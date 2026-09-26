@@ -15,5 +15,12 @@ test('claimUpdate é idempotente e tarefas são persistidas', () => {
   assert.equal(db.getApproval('7')?.taskId, id);
   assert.equal(db.setApprovalStatus('7', 'accepted'), true);
   assert.equal(db.setApprovalStatus('7', 'declined'), false);
+  const notificationId = db.enqueueNotification(123, '[20%] Atualização', id);
+  assert.equal(db.pendingNotificationCount(123), 1);
+  assert.equal(db.pendingNotifications(123)[0].text, '[20%] Atualização');
+  db.markNotificationFailed(notificationId, 'timeout');
+  assert.equal(db.pendingNotifications(123)[0].attempts, 1);
+  db.markNotificationSent(notificationId);
+  assert.equal(db.pendingNotificationCount(123), 0);
   db.close(); rmSync(dir, { recursive: true, force: true });
 });

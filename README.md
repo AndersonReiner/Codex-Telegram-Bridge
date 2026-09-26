@@ -614,6 +614,27 @@ Há outro processo ocupando a porta configurada. Encerre a instância anterior e
 inicie novamente com `./start.sh`. O script impede duplicidade quando as duas
 instâncias são iniciadas por ele.
 
+### `Telegram ... fetch failed`
+
+Esse erro significa falha de transporte entre a máquina e
+`https://api.telegram.org`. Token inválido normalmente retorna uma mensagem da
+API com HTTP 401, não `fetch failed`. O cliente usa timeout e três tentativas
+para cada chamada. Se o erro persistir, valide DNS, proxy, firewall e acesso
+HTTPS:
+
+```bash
+curl --fail-with-body "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"
+```
+
+O painel HTTP local e a execução do Codex podem continuar funcionando sem o
+Telegram; cada notificação faz três tentativas antes de ser registrada como
+falha.
+
+As notificações de tarefas são persistidas na tabela `notifications`. Quando o
+Telegram está indisponível, elas permanecem pendentes no SQLite. Na próxima
+mensagem ou interação por botão do mesmo chat, o bridge tenta enviar a fila
+pendente em ordem e marca cada item como `sent` somente após confirmação da API.
+
 | Sintoma | Verificação e ação |
 |---|---|
 | `PROJECTS_JSON` ausente | Crie `.env` na raiz e execute a aplicação a partir dessa pasta |

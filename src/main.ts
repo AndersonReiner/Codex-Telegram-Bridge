@@ -19,6 +19,9 @@ const preferencesByChat = new Map<number, CodexPreferences>();
 const lastTaskByChat = new Map<number, number>();
 const taskByThread = new Map<string, number>();
 const projectSubmissionLocks = new Map<string, Promise<void>>();
+const progressByTask = new Map<number, number>();
+const notificationFlushes = new Map<number, Promise<void>>();
+const progressContract = '\n\n[CONTRATO DE PROGRESSO OBRIGATÓRIO] Em toda atualização desta tarefa, comece a mensagem com [N%], usando um percentual inteiro baseado nos entregáveis realmente concluídos. Comece com [0%], avance somente após marcos verificáveis e use [100%] apenas quando todos os requisitos e validações estiverem concluídos. Informe em português o que foi concluído, a próxima etapa e bloqueios ou pendências. Não invente precisão.';
 function preferencesForChat(chatId: number): CodexPreferences { const cached = preferencesByChat.get(chatId); if (cached) return cached; const stored = db.getPreferences(chatId); preferencesByChat.set(chatId, stored); return stored; }
 function savePreferences(chatId: number, preferences: CodexPreferences): void { preferencesByChat.set(chatId, preferences); db.savePreferences(chatId, preferences); }
 
@@ -31,20 +34,52 @@ function taskForThread(threadId: string | undefined): ReturnType<Database['getTa
 }
 async function notifyTask(taskId: number, text: string): Promise<void> {
   const task = db.getTask(taskId);
-  if (task?.chatId === undefined || !telegram) return;
-  try { await telegram.send(task.chatId, `[${task.projectId} · tarefa ${taskId}] ${text}`); }
-  catch (error) { db.addEvent(taskId, 'notification_error', `Telegram indisponível: ${(error as Error).message}`); console.warn(`[telegram] notificação da tarefa ${taskId} não enviada: ${(error as Error).message}`); }
+  if (task?.chatId === undefined) return;
+  db.enqueueNotification(task.chatId, `[${task.projectId} · tarefa ${taskId}] ${text}`, taskId);
+  if (telegram) await flushPendingNotifications(task.chatId);
 }
-async function startTask(taskId: number): Promise<void> { const task = db.getTask(taskId); if (!task) return; const project = config.projects.find((item) => item.id === task.projectId); db.setTaskStatus(taskId, 'running'); taskByThread.set(task.threadId, taskId); await notifyTask(taskId, 'Execução iniciada.'); try { await codex.turn(task.threadId, task.text, task.chatId !== undefined ? preferencesForChat(task.chatId) : undefined, project?.cwd); } catch (error) { db.setTaskStatus(taskId, 'failed'); db.addEvent(taskId, 'error', (error as Error).message); await notifyTask(taskId, `Falha ao iniciar: ${(error as Error).message}`); } }
+async function flushPendingNotifications(chatId: number): Promise<void> {
+  if (!telegram) return;
+  const previous = notificationFlushes.get(chatId);
+  if (previous) return previous;
+  const current = (async () => {
+    for (const notification of db.pendingNotifications(chatId)) {
+      try {
+        await telegram!.send(chatId, notification.text);
+        db.markNotificationSent(notification.id);
+      } catch (error) {
+        const message = (error as Error).message;
+        db.markNotificationFailed(notification.id, message);
+        if (notification.taskId !== undefined) db.addEvent(notification.taskId, 'notification_error', `Telegram indisponível; mensagem mantida na fila: ${message}`);
+        console.warn(`[telegram] notificação ${notification.id} mantida na fila: ${message}`);
+        break;
+      }
+    }
+  })();
+  notificationFlushes.set(chatId, current);
+  try { await current; } finally { if (notificationFlushes.get(chatId) === current) notificationFlushes.delete(chatId); }
+}
+async function startTask(taskId: number): Promise<void> { const task = db.getTask(taskId); if (!task) return; const project = config.projects.find((item) => item.id === task.projectId); progressByTask.set(taskId, 0); db.setTaskStatus(taskId, 'running'); taskByThread.set(task.threadId, taskId); await notifyTask(taskId, '[0%] Execução iniciada.'); try { await codex.turn(task.threadId, `${task.text}${progressContract}`, task.chatId !== undefined ? preferencesForChat(task.chatId) : undefined, project?.cwd); } catch (error) { db.setTaskStatus(taskId, 'failed'); const message = `[${progressByTask.get(taskId) ?? 0}%] Falha ao iniciar: ${(error as Error).message}`; db.addEvent(taskId, 'error', message); await notifyTask(taskId, message); } }
 async function startNext(projectId: string): Promise<void> { const next = db.nextQueued(projectId); if (next) await startTask(next.id); }
 
 const codex = new CodexClient(config.codexCommand, (event) => {
   const task = taskForThread(event.threadId); if (!task || !event.text) return;
-  db.addEvent(task.id, event.type, event.text);
-  if (event.type === 'status') { db.setTaskStatus(task.id, event.text.includes('interrompida') ? 'interrupted' : 'completed'); void notifyTask(task.id, event.text); void startNext(task.projectId); }
-  else if (event.type === 'error') { db.setTaskStatus(task.id, 'failed'); void notifyTask(task.id, event.text); void startNext(task.projectId); }
-  else void notifyTask(task.id, event.text);
+  const text = progressMessage(task.id, event.type, event.text);
+  db.addEvent(task.id, event.type, text);
+  if (event.type === 'status') { db.setTaskStatus(task.id, event.text.includes('interrompida') ? 'interrupted' : 'completed'); void notifyTask(task.id, text); void startNext(task.projectId); }
+  else if (event.type === 'error') { db.setTaskStatus(task.id, 'failed'); void notifyTask(task.id, text); void startNext(task.projectId); }
+  else void notifyTask(task.id, text);
 });
+function progressMessage(taskId: number, type: string, text: string): string {
+  const explicit = text.match(/\[(\d{1,3})%\]/) || text.match(/(?:cerca de|aproximadamente|about)\s*(\d{1,3})\s*%/i);
+  let progress = progressByTask.get(taskId) ?? 0;
+  if (explicit) progress = Math.max(0, Math.min(100, Number(explicit[1])));
+  if (type === 'status' && /execução concluída/i.test(text)) progress = 100;
+  progressByTask.set(taskId, progress);
+  if (/^\[\d{1,3}%\]/.test(text.trim())) return text;
+  const withoutNaturalPercent = explicit && !explicit[0].startsWith('[') ? text.replace(explicit[0], '').trim() : text;
+  return `[${progress}%] ${withoutNaturalPercent}`;
+}
 function requestIdValue(id: number | string): number | string { return typeof id === 'number' ? id : (/^\d+$/.test(id) ? Number(id) : id); }
 
 codex.onApproval((id, method, params) => {
@@ -154,6 +189,7 @@ async function handleTelegram(update: TelegramUpdate): Promise<void> {
   }
   const message = update.message!; const text = message.text?.trim(); if (!text || !db.claimUpdate(update.update_id)) return;
   if (message.from?.id !== config.allowedUserId || (config.allowedChatId !== undefined && chatId !== config.allowedChatId)) { await telegram.send(chatId, 'Acesso não autorizado.'); return; }
+  await flushPendingNotifications(chatId);
   if (!selectedProjectByChat.has(chatId)) selectedProjectByChat.set(chatId, config.projects[0].id); const selectedId = selectedProjectByChat.get(chatId)!;
   if (text === '/start') { await telegram.send(chatId, 'Codex Telegram Bridge conectado. Use o menu abaixo para selecionar projetos e acompanhar tarefas.'); await telegram.sendMainMenu(chatId); return; }
   if (text === '/projetos' || text === 'Projetos') { await telegram.sendProjectMenu(chatId, selectedId); return; }
