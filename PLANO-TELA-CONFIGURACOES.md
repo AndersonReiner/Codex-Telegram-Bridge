@@ -524,5 +524,26 @@ Limites desta etapa:
 
 - [ ] A tela ainda não grava `.env`.
 - [ ] A tela ainda não possui autenticação administrativa.
-- [ ] A seleção e incorporação dos componentes específicos Watermelon continuam pendentes de confirmação no catálogo.
+- [x] Componentes Watermelon incorporados do registry oficial; fontes e licença em `docs/watermelon-components.md`.
 - [ ] A API ainda não aplica mudanças nem reinicia processos.
+
+## 16. Reformulação com Watermelon UI — 26/09/2026
+
+- [x] Migrar a interface de configurações para React e TypeScript com build Vite/Tailwind.
+- [x] Incorporar 11 famílias de componentes reais do registry Watermelon com licença MIT e revisão fixada.
+- [x] Substituir a tela anterior por sidebar, navegação mobile, resumo, cartões por grupo, abas e barra fixa de ações.
+- [x] Implementar paletas Porcelana (clara) e Grafite (escura), com destaque esmeralda e alternância persistente.
+- [x] Editar projetos em lista estruturada e JSON, modelos em tags e esforços por switches.
+- [x] Preservar rascunho entre buscas, seções e abas; validar também campos não visíveis.
+- [x] Revisar alterações e confirmar descarte usando diálogos acessíveis.
+- [x] Ativar privacidade por padrão para credencial, IDs e caminhos.
+- [x] Manter token salvo fora da API/DOM; permitir revelar somente token novo com confirmação e limite de 15 segundos.
+- [x] Reativar proteção ao perder foco, sair da aba ou pressionar Escape; nunca persistir segredo no navegador.
+- [x] Incluir botão flutuante de ajuda, atalho de busca, estados de carregamento, erro e ausência de resultados.
+- [x] Corrigir aceitação de porta acima de 65535 e rejeição indevida de ID negativo de chat.
+- [x] Validar interações no Chromium, injeção de HTML como texto, privacidade e layouts 360/768/1440 px nos dois temas.
+
+Os testes de interface usam API real isolada, banco em memória e valores fictícios.
+A interface nova continua trabalhando com rascunhos: autenticação administrativa,
+gravação atômica de `.env` e aplicação/reinício permanecem pendentes. Não apresentar
+a reformulação visual como conclusão integral do plano.

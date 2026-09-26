@@ -112,8 +112,10 @@ export function validateSettingsDraft(draft: SettingsDraft): SettingsValidation 
   if (configuredEfforts !== undefined && (!Array.isArray(configuredEfforts) || configuredEfforts.some((effort) => !efforts.has(String(effort))))) errors.push({ key: 'CODEX_REASONING_EFFORTS_JSON', message: 'Use apenas low, medium, high ou xhigh.' });
 
   positiveInteger(errors, draft, 'TELEGRAM_ALLOWED_USER_ID');
-  positiveInteger(errors, draft, 'TELEGRAM_ALLOWED_CHAT_ID');
+  const chatId = textValue(draft, 'TELEGRAM_ALLOWED_CHAT_ID');
+  if (chatId && (!/^-?\d+$/.test(chatId) || !Number.isSafeInteger(Number(chatId)) || Number(chatId) === 0)) errors.push({ key: 'TELEGRAM_ALLOWED_CHAT_ID', message: 'Informe um ID inteiro não nulo; grupos podem ter ID negativo.' });
   positiveInteger(errors, draft, 'HTTP_PORT');
+  if (Number(draft.HTTP_PORT) > 65535) errors.push({ key: 'HTTP_PORT', message: 'A porta deve estar entre 1 e 65535.' });
   positiveInteger(errors, draft, 'BRIDGE_RESTART_DELAY_MS', true);
   positiveInteger(errors, draft, 'BRIDGE_SHUTDOWN_TIMEOUT', true);
   const host = textValue(draft, 'HTTP_HOST');

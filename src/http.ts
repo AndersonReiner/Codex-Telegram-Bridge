@@ -73,9 +73,11 @@ function readBody(request: import('node:http').IncomingMessage): Promise<unknown
 }
 
 function serveStatic(name: string, response: import('node:http').ServerResponse): void {
-  const path = join(process.cwd(), 'web', name);
+  const directory = ['configuracoes.js', 'configuracoes.css'].includes(name) ? 'dist/settings' : 'web';
+  const path = join(process.cwd(), directory, name);
   if (!existsSync(path)) { response.statusCode = 404; response.end('Not found'); return; }
   const types: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
   response.setHeader('content-type', types[extname(path)] || 'application/octet-stream');
+  response.setHeader('cache-control', 'no-cache');
   createReadStream(path).pipe(response);
 }
