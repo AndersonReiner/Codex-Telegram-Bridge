@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex Telegram Bridge</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">✦</span><div><strong>Codex Bridge</strong><small>painel local de acompanhamento</small></div></div>
+      <div class="topbar-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Ativar modo claro">☼ <span>Modo claro</span></button><div class="connection"><span class="dot" id="health-dot"></span><span id="health-label">Verificando conexão...</span></div></div>
+    </header>
+    <main class="shell">
+      <section class="hero"><div><p class="eyebrow">VISÃO GERAL</p><h1>Acompanhe seu trabalho</h1><p class="muted">Uma visão rápida das sessões, tarefas e eventos recebidos do Codex.</p></div><div class="hero-actions"><a class="button secondary" href="/hello-world">Hello World</a><button class="button secondary" id="refresh">Atualizar agora</button></div></section>
+      <section class="stats" aria-label="Resumo"><article><span class="stat-label">Projetos</span><strong id="project-count">—</strong></article><article><span class="stat-label">Tarefas recentes</span><strong id="task-count">—</strong></article><article><span class="stat-label">Em execução</span><strong id="running-count">—</strong></article><article><span class="stat-label">Eventos registrados</span><strong id="event-count">—</strong></article></section>
+      <section class="panel command-panel"><div class="panel-heading"><div><p class="eyebrow">NOVA TAREFA</p><h2>Enviar uma instrução ao Codex</h2></div></div><form id="command-form"><select id="project-select" aria-label="Projeto"></select><textarea id="command-text" rows="3" placeholder="Ex.: analise o projeto e me mostre os próximos passos" required></textarea><div class="command-footer"><span id="command-feedback" class="muted">A tarefa será executada no diretório selecionado.</span><button class="button" type="submit">Enviar tarefa</button></div></form></section>
+      <div class="grid">
+        <section class="panel tasks-panel"><div class="panel-heading"><div><p class="eyebrow">ATIVIDADE</p><h2>Tarefas recentes</h2></div><span class="live-label"><span class="live-dot"></span> atualização automática</span></div><div id="tasks" class="task-list"><div class="empty">Carregando tarefas...</div></div></section>
+        <aside class="panel projects-panel"><div class="panel-heading"><div><p class="eyebrow">CONTEXTO</p><h2>Projetos cadastrados</h2></div></div><div id="projects" class="project-list"><div class="empty">Carregando projetos...</div></div></aside>
+      </div>
+      <section class="panel events-panel"><div class="panel-heading"><div><p class="eyebrow">RASTREAMENTO</p><h2>Últimos eventos</h2></div><span id="last-update" class="muted">—</span></div><div id="events" class="event-list"><div class="empty">Carregando eventos...</div></div></section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

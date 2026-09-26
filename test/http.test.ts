@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Database } from '../src/database.js';
+import { startHttp } from '../src/http.js';
+
+test('API local expõe saúde, dados e interface web', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'codex-telegram-http-'));
+  const db = new Database(join(dir, 'bridge.sqlite'));
+  const server = startHttp({ telegramToken: 'test', allowedUserId: 1, projects: [{ id: 'demo', name: 'Demo', cwd: '/tmp/demo' }], codexCommand: 'codex', codexModels: [], codexReasoningEfforts: ['low', 'medium', 'high'], dbPath: join(dir, 'bridge.sqlite'), httpHost: '127.0.0.1', httpPort: 0 }, db, async (text) => { const id = db.createTask('demo', 'thread-test', text); return { taskId: id }; });
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  const port = (server.address() as { port: number }).port;
+  assert.equal((await (await fetch(`http://127.0.0.1:${port}/health`)).json() as any).status, 'ok');
+  assert.match(await (await fetch(`http://127.0.0.1:${port}/`)).text(), /Codex Telegram Bridge/);
+  assert.equal((await (await fetch(`http://127.0.0.1:${port}/projects`)).json() as any).projects.length, 1);
+  const helloWorld = await fetch(`http://127.0.0.1:${port}/hello-world`);
+  assert.equal(helloWorld.status, 200);
+  assert.match(await helloWorld.text(), /Hello World!/);
+  const command = await fetch(`http://127.0.0.1:${port}/commands`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'teste pelo navegador', projectId: 'demo' }) });
+  assert.equal(command.status, 202); assert.equal((await command.json() as any).accepted, true);
+  await new Promise<void>((resolve) => server.close(() => resolve())); db.close(); rmSync(dir, { recursive: true, force: true });
+});
