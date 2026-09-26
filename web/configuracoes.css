@@ -1,6 +1,10 @@
 .settings-shell { padding-top: 42px; }
 .settings-notice { display: flex; gap: 12px; align-items: baseline; margin: -12px 0 18px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); background: var(--panel-2); }
 .settings-notice strong { color: var(--yellow); white-space: nowrap; }
+.settings-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.settings-toolbar label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.settings-toolbar input { flex: 1; color: var(--color, #e8ecf4); background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 11px 12px; font: inherit; }
+.settings-error { color: var(--red); font-size: 12px; }
 .settings-groups { display: grid; gap: 18px; }
 .settings-group { padding: 20px; }
 .settings-list { display: grid; gap: 8px; }
@@ -8,7 +12,11 @@
 .setting-row strong, .setting-row code, .setting-row p { display: block; }
 .setting-row code { margin-top: 5px; color: var(--accent); font-size: 11px; }
 .setting-row p { margin: 8px 0 0; font-size: 12px; }
-.setting-value { min-width: 260px; text-align: right; overflow-wrap: anywhere; }
-.setting-value span { display: block; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
-.setting-value small { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; }
-@media (max-width: 760px) { .settings-notice, .setting-row { align-items: start; flex-direction: column; }.setting-value { min-width: 0; text-align: left; } }
+.setting-description { flex: 1; min-width: 220px; }
+.setting-description small { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; }
+.setting-editor { min-width: 320px; }
+.setting-editor input, .setting-editor textarea { width: 100%; color: var(--color, #e8ecf4); background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 10px; font: inherit; font-size: 12px; }
+.setting-editor textarea { margin: 0; resize: vertical; font-family: ui-monospace, SFMono-Regular, monospace; }
+.settings-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 760px) { .settings-notice, .setting-row { align-items: start; flex-direction: column; }.settings-toolbar { align-items: stretch; flex-direction: column; }.setting-editor { min-width: 0; width: 100%; }.settings-actions { justify-content: stretch; }.settings-actions .button { flex: 1; } }
