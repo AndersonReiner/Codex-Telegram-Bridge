@@ -71,10 +71,29 @@ export class TelegramClient {
   }
   private async call(method: string, body: unknown): Promise<any> {
     if (!this.config.telegramToken) throw new Error('Telegram não configurado');
-    const response = await fetch(`https://api.telegram.org/bot${this.config.telegramToken}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    const payload = await response.json() as { ok: boolean; result?: unknown; description?: string };
-    if (!response.ok || !payload.ok) throw new Error(payload.description || `Telegram ${method} falhou`);
-    return payload.result;
+    const attempts = 3;
+    const timeoutMs = method === 'getUpdates' ? 35_000 : 15_000;
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const response = await fetch(`https://api.telegram.org/bot${this.config.telegramToken}/${method}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        const payload = await response.json() as { ok: boolean; result?: unknown; description?: string };
+        if (!response.ok || !payload.ok) throw new Error(payload.description || `Telegram ${method} falhou (HTTP ${response.status})`);
+        return payload.result;
+      } catch (error) {
+        lastError = telegramError(method, error);
+        // Erros HTTP da API não melhoram com retry; retentamos apenas falhas
+        // de transporte ou timeout.
+        if (error instanceof Error && !isTelegramTransportError(error)) throw lastError;
+        if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+      }
+    }
+    throw lastError || new Error(`Telegram ${method} falhou`);
   }
   private preferencesText(preferences: CodexPreferences): string {
     const model = preferences.model || this.config.codexModel || 'padrão do Codex';
@@ -82,5 +101,16 @@ export class TelegramClient {
     const permission = ({ safe: 'seguro', workspace: 'projeto', full: 'total' } as Record<PermissionLevel, string>)[preferences.permissionLevel || 'workspace'];
     return `⚙️ Preferências do Codex\n\nModelo: ${model}\nNível de raciocínio: ${effort}\nNível de permissão: ${permission}\n\nEssas opções serão aplicadas às próximas tarefas.`;
   }
+}
+
+function isTelegramTransportError(error: Error): boolean {
+  return error.name === 'AbortError' || error.name === 'TimeoutError' || error.message === 'fetch failed' || 'cause' in error;
+}
+
+function telegramError(method: string, error: unknown): Error {
+  if (!(error instanceof Error)) return new Error(`Telegram ${method}: ${String(error)}`);
+  const cause = error.cause as { code?: string; message?: string } | undefined;
+  const detail = cause?.code || cause?.message;
+  return new Error(`Telegram ${method}: ${detail ? `${error.message} (${detail})` : error.message}`);
 }
 export type { ReplyMarkup, TelegramUpdate };
