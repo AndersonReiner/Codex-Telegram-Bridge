@@ -14,6 +14,13 @@ test('API local expõe saúde, dados e interface web', async () => {
   const port = (server.address() as { port: number }).port;
   assert.equal((await (await fetch(`http://127.0.0.1:${port}/health`)).json() as any).status, 'ok');
   assert.match(await (await fetch(`http://127.0.0.1:${port}/`)).text(), /Codex Telegram Bridge/);
+  const settingsPage = await fetch(`http://127.0.0.1:${port}/configuracoes`);
+  assert.equal(settingsPage.status, 200);
+  assert.match(await settingsPage.text(), /Parâmetros do Bridge/);
+  const settings = await (await fetch(`http://127.0.0.1:${port}/api/settings`)).json() as any;
+  assert.equal(settings.readOnly, true);
+  assert.equal(settings.settings.length, 15);
+  assert.deepEqual(settings.settings.find((item: any) => item.key === 'TELEGRAM_BOT_TOKEN').value, { configured: true });
   assert.equal((await (await fetch(`http://127.0.0.1:${port}/projects`)).json() as any).projects.length, 1);
   const helloWorld = await fetch(`http://127.0.0.1:${port}/hello-world`);
   assert.equal(helloWorld.status, 200);

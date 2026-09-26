@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { extname, join } from 'node:path';
 import type { Config } from './config.js';
 import type { Database } from './database.js';
+import { settingsSchema, settingsSnapshot } from './settings.js';
 
 export type CommandHandler = (text: string, projectId?: string) => Promise<{ taskId: number }>;
 
@@ -13,7 +14,11 @@ export function startHttp(config: Config, db: Database, onCommand?: CommandHandl
     if (request.method === 'GET' && pathname === '/hello-world') { serveStatic('hello-world.html', response); return; }
     if (request.method === 'GET' && pathname === '/app.js') { serveStatic('app.js', response); return; }
     if (request.method === 'GET' && pathname === '/styles.css') { serveStatic('styles.css', response); return; }
+    if (request.method === 'GET' && pathname === '/configuracoes') { serveStatic('configuracoes.html', response); return; }
+    if (request.method === 'GET' && pathname === '/configuracoes.js') { serveStatic('configuracoes.js', response); return; }
+    if (request.method === 'GET' && pathname === '/configuracoes.css') { serveStatic('configuracoes.css', response); return; }
     response.setHeader('content-type', 'application/json; charset=utf-8');
+    response.setHeader('cache-control', 'no-store');
     if (request.method === 'GET' && request.url === '/health') { response.end(JSON.stringify({ status: 'ok' })); return; }
     if (request.method === 'GET' && request.url === '/status') { response.end(JSON.stringify({ status: 'ok', tasks: db.status() })); return; }
     if (request.method === 'GET' && pathname === '/events') {
@@ -22,6 +27,8 @@ export function startHttp(config: Config, db: Database, onCommand?: CommandHandl
       response.end(JSON.stringify({ events: db.events(parsedTaskId) })); return;
     }
     if (request.method === 'GET' && pathname === '/projects') { response.end(JSON.stringify({ projects: config.projects })); return; }
+    if (request.method === 'GET' && pathname === '/api/settings/schema') { response.end(JSON.stringify(settingsSchema())); return; }
+    if (request.method === 'GET' && pathname === '/api/settings') { response.end(JSON.stringify(settingsSnapshot(config))); return; }
     if (request.method === 'POST' && pathname === '/commands') { void handleCommand(request, response, onCommand); return; }
     response.statusCode = 404; response.end(JSON.stringify({ error: 'not_found' }));
   });

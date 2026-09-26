@@ -1,0 +1,14 @@
+.settings-shell { padding-top: 42px; }
+.settings-notice { display: flex; gap: 12px; align-items: baseline; margin: -12px 0 18px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); background: var(--panel-2); }
+.settings-notice strong { color: var(--yellow); white-space: nowrap; }
+.settings-groups { display: grid; gap: 18px; }
+.settings-group { padding: 20px; }
+.settings-list { display: grid; gap: 8px; }
+.setting-row { display: flex; justify-content: space-between; gap: 22px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(28,36,54,.42); }
+.setting-row strong, .setting-row code, .setting-row p { display: block; }
+.setting-row code { margin-top: 5px; color: var(--accent); font-size: 11px; }
+.setting-row p { margin: 8px 0 0; font-size: 12px; }
+.setting-value { min-width: 260px; text-align: right; overflow-wrap: anywhere; }
+.setting-value span { display: block; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+.setting-value small { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; }
+@media (max-width: 760px) { .settings-notice, .setting-row { align-items: start; flex-direction: column; }.setting-value { min-width: 0; text-align: left; } }

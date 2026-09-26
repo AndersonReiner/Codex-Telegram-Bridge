@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configurações — Codex Bridge</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/configuracoes.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">✦</span><div><strong>Codex Bridge</strong><small>configurações do ambiente</small></div></div>
+      <div class="topbar-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Ativar modo claro">☼ <span>Modo claro</span></button><a class="button secondary" href="/">Voltar ao painel</a></div>
+    </header>
+    <main class="shell settings-shell">
+      <section class="hero"><div><p class="eyebrow">CONFIGURAÇÕES</p><h1>Parâmetros do Bridge</h1><p class="muted">Primeira etapa: visualize a configuração efetiva sem expor credenciais. A edição e a aplicação entrarão nas próximas fases.</p></div></section>
+      <section class="settings-notice" role="status"><strong>Modo somente leitura</strong><span>Os valores abaixo refletem o processo atual. Alterações exigirão autenticação, revisão e reinício controlado.</span></section>
+      <section id="settings" class="settings-groups"><div class="empty">Carregando configurações...</div></section>
+    </main>
+    <script type="module" src="/configuracoes.js"></script>
+  </body>
+</html>

@@ -507,3 +507,22 @@ Preencher durante a execução; referências podem apontar para arquivo, commit,
 - [ ] Critérios da matriz de validação concluídos e documentados.
 - [ ] README e `.env.example` refletem a implementação entregue.
 - [ ] Checkboxes atualizados conforme evidência, sem marcar como pronto apenas por existir código.
+
+## 15. Progresso de implementação — 26/09/2026
+
+Primeira fatia implementada no projeto:
+
+- [x] Catálogo tipado inicial dos 15 parâmetros em `src/settings.ts`.
+- [x] Endpoint somente leitura `GET /api/settings/schema`.
+- [x] Endpoint somente leitura `GET /api/settings`, com token do Telegram mascarado.
+- [x] Rota web `/configuracoes` e recursos estáticos da tela.
+- [x] Link de entrada no dashboard principal.
+- [x] Reutilização do tema claro/escuro existente do painel.
+- [x] Teste HTTP cobrindo a página e a presença dos 15 parâmetros.
+
+Limites desta etapa:
+
+- [ ] A tela ainda não grava `.env`.
+- [ ] A tela ainda não possui autenticação administrativa.
+- [ ] A seleção e incorporação dos componentes específicos Watermelon continuam pendentes de confirmação no catálogo.
+- [ ] A API ainda não aplica mudanças nem reinicia processos.
