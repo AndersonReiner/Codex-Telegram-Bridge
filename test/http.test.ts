@@ -21,6 +21,10 @@ test('API local expõe saúde, dados e interface web', async () => {
   assert.equal(settings.readOnly, true);
   assert.equal(settings.settings.length, 15);
   assert.deepEqual(settings.settings.find((item: any) => item.key === 'TELEGRAM_BOT_TOKEN').value, { configured: true });
+  const validDraft = await fetch(`http://127.0.0.1:${port}/api/settings/validate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ PROJECTS_JSON: '[{"id":"demo","name":"Demo","cwd":"/tmp/demo"}]', HTTP_PORT: '8787', CODEX_MODELS_JSON: '[]', CODEX_REASONING_EFFORTS_JSON: '["low"]' }) });
+  assert.equal(validDraft.status, 200); assert.equal((await validDraft.json() as any).valid, true);
+  const invalidDraft = await fetch(`http://127.0.0.1:${port}/api/settings/validate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ HTTP_PORT: '70000', CODEX_REASONING_EFFORTS_JSON: '["invalid"]' }) });
+  assert.equal(invalidDraft.status, 422); assert.equal((await invalidDraft.json() as any).valid, false);
   assert.equal((await (await fetch(`http://127.0.0.1:${port}/projects`)).json() as any).projects.length, 1);
   const helloWorld = await fetch(`http://127.0.0.1:${port}/hello-world`);
   assert.equal(helloWorld.status, 200);

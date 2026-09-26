@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { extname, join } from 'node:path';
 import type { Config } from './config.js';
 import type { Database } from './database.js';
-import { settingsSchema, settingsSnapshot } from './settings.js';
+import { settingsSchema, settingsSnapshot, validateSettingsDraft } from './settings.js';
 
 export type CommandHandler = (text: string, projectId?: string) => Promise<{ taskId: number }>;
 
@@ -29,11 +29,25 @@ export function startHttp(config: Config, db: Database, onCommand?: CommandHandl
     if (request.method === 'GET' && pathname === '/projects') { response.end(JSON.stringify({ projects: config.projects })); return; }
     if (request.method === 'GET' && pathname === '/api/settings/schema') { response.end(JSON.stringify(settingsSchema())); return; }
     if (request.method === 'GET' && pathname === '/api/settings') { response.end(JSON.stringify(settingsSnapshot(config))); return; }
+    if (request.method === 'POST' && pathname === '/api/settings/validate') { void handleSettingsValidation(request, response); return; }
     if (request.method === 'POST' && pathname === '/commands') { void handleCommand(request, response, onCommand); return; }
     response.statusCode = 404; response.end(JSON.stringify({ error: 'not_found' }));
   });
   server.listen(config.httpPort, config.httpHost);
   return server;
+}
+
+async function handleSettingsValidation(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse): Promise<void> {
+  try {
+    const draft = await readBody(request);
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('O rascunho deve ser um objeto JSON.');
+    const validation = validateSettingsDraft(draft as Record<string, unknown>);
+    response.statusCode = validation.valid ? 200 : 422;
+    response.end(JSON.stringify(validation));
+  } catch (error) {
+    response.statusCode = 400;
+    response.end(JSON.stringify({ error: (error as Error).message }));
+  }
 }
 
 async function handleCommand(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse, onCommand?: CommandHandler): Promise<void> {

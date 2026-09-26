@@ -63,3 +63,63 @@ export function settingsSnapshot(config: Config): { settings: Array<SettingDefin
     })),
   };
 }
+
+export type SettingsDraft = Record<string, unknown>;
+export type SettingsValidation = { valid: boolean; errors: Array<{ key: string; message: string }>; warnings: string[] };
+
+const knownKeys = new Set(SETTINGS_CATALOG.map((setting) => setting.key));
+const efforts = new Set(['low', 'medium', 'high', 'xhigh']);
+function textValue(draft: SettingsDraft, key: string): string | undefined {
+  const value = draft[key];
+  return value === undefined || value === null ? undefined : String(value).trim();
+}
+function addJsonError(errors: SettingsValidation['errors'], draft: SettingsDraft, key: string, message: string): unknown {
+  const value = draft[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') { errors.push({ key, message: 'Informe JSON como texto.' }); return undefined; }
+  try { return JSON.parse(value); } catch { errors.push({ key, message: 'JSON inválido.' }); return undefined; }
+}
+function positiveInteger(errors: SettingsValidation['errors'], draft: SettingsDraft, key: string, allowZero = false): void {
+  const value = textValue(draft, key);
+  if (value === undefined || value === '') return;
+  const parsed = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(parsed) || (allowZero ? parsed < 0 : parsed < 1)) errors.push({ key, message: allowZero ? 'Informe um inteiro maior ou igual a zero.' : 'Informe um inteiro positivo.' });
+}
+
+export function validateSettingsDraft(draft: SettingsDraft): SettingsValidation {
+  const errors: SettingsValidation['errors'] = [];
+  const warnings: string[] = [];
+  for (const key of Object.keys(draft)) if (!knownKeys.has(key)) errors.push({ key, message: 'Parâmetro não reconhecido.' });
+
+  const projects = addJsonError(errors, draft, 'PROJECTS_JSON', 'JSON inválido.');
+  if (projects !== undefined) {
+    if (!Array.isArray(projects) || projects.length === 0) errors.push({ key: 'PROJECTS_JSON', message: 'Informe ao menos um projeto.' });
+    else {
+      const ids = new Set<string>();
+      for (const project of projects) {
+        if (!project || typeof project !== 'object' || typeof project.id !== 'string' || typeof project.name !== 'string' || typeof project.cwd !== 'string') errors.push({ key: 'PROJECTS_JSON', message: 'Cada projeto precisa de id, name e cwd.' });
+        else {
+          if (!project.id.trim() || !project.name.trim() || !project.cwd.trim()) errors.push({ key: 'PROJECTS_JSON', message: 'Projeto não pode ter campos vazios.' });
+          if (ids.has(project.id)) errors.push({ key: 'PROJECTS_JSON', message: `ID de projeto duplicado: ${project.id}.` });
+          ids.add(project.id);
+        }
+      }
+    }
+  }
+  const models = addJsonError(errors, draft, 'CODEX_MODELS_JSON', 'JSON inválido.');
+  if (models !== undefined && (!Array.isArray(models) || models.some((model) => typeof model !== 'string' || !model.trim()))) errors.push({ key: 'CODEX_MODELS_JSON', message: 'Informe uma lista de nomes de modelos não vazios.' });
+  const configuredEfforts = addJsonError(errors, draft, 'CODEX_REASONING_EFFORTS_JSON', 'JSON inválido.');
+  if (configuredEfforts !== undefined && (!Array.isArray(configuredEfforts) || configuredEfforts.some((effort) => !efforts.has(String(effort))))) errors.push({ key: 'CODEX_REASONING_EFFORTS_JSON', message: 'Use apenas low, medium, high ou xhigh.' });
+
+  positiveInteger(errors, draft, 'TELEGRAM_ALLOWED_USER_ID');
+  positiveInteger(errors, draft, 'TELEGRAM_ALLOWED_CHAT_ID');
+  positiveInteger(errors, draft, 'HTTP_PORT');
+  positiveInteger(errors, draft, 'BRIDGE_RESTART_DELAY_MS', true);
+  positiveInteger(errors, draft, 'BRIDGE_SHUTDOWN_TIMEOUT', true);
+  const host = textValue(draft, 'HTTP_HOST');
+  if (host === '') errors.push({ key: 'HTTP_HOST', message: 'Informe um endereço HTTP.' });
+  if (textValue(draft, 'CODEX_COMMAND') === '') errors.push({ key: 'CODEX_COMMAND', message: 'Informe o executável do Codex.' });
+  if (textValue(draft, 'DB_PATH') === '') errors.push({ key: 'DB_PATH', message: 'Informe o caminho do banco.' });
+  if (textValue(draft, 'TELEGRAM_BOT_TOKEN') !== undefined && textValue(draft, 'TELEGRAM_BOT_TOKEN') === '') warnings.push('O token vazio remove a configuração do Telegram.');
+  return { valid: errors.length === 0, errors, warnings };
+}
