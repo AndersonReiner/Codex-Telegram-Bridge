@@ -64,6 +64,16 @@ export class CodexClient {
   }
   async respond(requestId: number | string, decision: unknown): Promise<void> { this.send({ id: requestId, result: decision }); }
   async interrupt(threadId: string, turnId?: string): Promise<void> { await this.request('turn/interrupt', { threadId, ...(turnId ? { turnId } : {}) }); }
+  close(): void {
+    const process = this.process;
+    if (!process) return;
+    this.process = undefined;
+    const error = new Error('Codex App Server encerrado junto com o bridge');
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+    this.agentBuffers.clear();
+    if (!process.killed) process.kill('SIGTERM');
+  }
   private request(method: string, params: unknown): Promise<any> {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.send({ method, id, params }); });

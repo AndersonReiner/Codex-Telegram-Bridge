@@ -512,6 +512,7 @@ Estados de tarefa: `queued` (fila), `running` (execução), `waiting_user` (agua
 
 | Comando | Uso |
 |---|---|
+| `./start.sh` | Compila, inicia, registra logs em `data/start.log` e trata `Ctrl+C` |
 | `npm ci` | Instala versões do lockfile |
 | `npm run build` | Compila fontes e testes |
 | `npm start` | Executa `dist/src/main.js`; não compila |
@@ -524,8 +525,14 @@ Estados de tarefa: `queued` (fila), `running` (execução), `waiting_user` (agua
 1. Espere tarefas terminarem, quando possível: reiniciar não é uma pausa recuperável.
 2. No terminal da instância atual, pressione `Ctrl+C` e aguarde a saída. O polling pode aguardar a requisição de até 25 segundos; falhas de rede podem atrasar mais.
 3. Confirme que a porta ficou livre. Em Linux: `ss -ltnp 'sport = :8787'`.
-4. Na raiz, execute `npm run dev`.
+4. Na raiz, execute `./start.sh`.
 5. Confira `/health` e envie `/start` no Telegram para obter o teclado atualizado.
+
+O script precisa estar executável (`chmod +x start.sh`, já aplicado no repositório). Ele mostra os logs no terminal e também os acrescenta em `data/start.log`. `Ctrl+C`, `SIGTERM` e `SIGHUP` são encaminhados à aplicação; se ela não encerrar no prazo padrão de 30 segundos, o processo é finalizado. Para mudar o prazo ou o arquivo de log:
+
+```bash
+BRIDGE_SHUTDOWN_TIMEOUT=45 BRIDGE_LOG_FILE=/tmp/codex-bridge.log ./start.sh
+```
 
 Não abra uma segunda instância para tentar reiniciar a primeira. Além de `EADDRINUSE`, a inicialização já abre o banco e marca tarefas ativas como `unknown` antes de detectar o conflito de porta.
 
@@ -581,6 +588,31 @@ Eles não comprovam integração real com Telegram, modelos, callbacks de prefer
 Não edite `dist/` diretamente: é sobrescrito no build. Não edite schemas gerados para corrigir o bridge; a adaptação do protocolo fica em `src/codex-client.ts`. Não versione `.env`, banco ou dependências. O `.gitignore` já contempla esses caminhos.
 
 ## Solução de problemas
+
+### `thread-store conflict: ... already has an active writer`
+
+Esse erro ocorre quando uma sessão persistida do Codex ainda está sendo usada
+por outro processo ou ficou bloqueada após uma interrupção. O bridge trata esse
+caso automaticamente: preserva a thread antiga, inicia uma nova thread no mesmo
+projeto, atualiza a sessão ativa no SQLite e registra a recuperação no log e na
+tarefa. Nenhum histórico é apagado.
+
+Para evitar duas instâncias do bridge, inicie-o pela raiz com:
+
+```bash
+./start.sh
+```
+
+O script usa `data/bridge.lock`; ao pressionar `Ctrl+C`, ele encerra o processo
+filho e libera o lock. Se uma tarefa específica precisar ser abandonada
+manualmente, `/nova` também remove somente a sessão ativa do projeto e mantém
+as tarefas e eventos registrados.
+
+### `EADDRINUSE` na porta 8787
+
+Há outro processo ocupando a porta configurada. Encerre a instância anterior e
+inicie novamente com `./start.sh`. O script impede duplicidade quando as duas
+instâncias são iniciadas por ele.
 
 | Sintoma | Verificação e ação |
 |---|---|
