@@ -18,6 +18,7 @@ const selectedProjectByChat = new Map<number, string>();
 const preferencesByChat = new Map<number, CodexPreferences>();
 const lastTaskByChat = new Map<number, number>();
 const taskByThread = new Map<string, number>();
+const projectSubmissionLocks = new Map<string, Promise<void>>();
 function preferencesForChat(chatId: number): CodexPreferences { const cached = preferencesByChat.get(chatId); if (cached) return cached; const stored = db.getPreferences(chatId); preferencesByChat.set(chatId, stored); return stored; }
 function savePreferences(chatId: number, preferences: CodexPreferences): void { preferencesByChat.set(chatId, preferences); db.savePreferences(chatId, preferences); }
 
@@ -59,13 +60,30 @@ codex.onApproval((id, method, params) => {
 async function submitTask(text: string, projectId?: string, chatId?: number): Promise<{ taskId: number }> {
   const selectedId = projectId || (chatId !== undefined ? selectedProjectByChat.get(chatId) : undefined) || config.projects[0].id;
   const project = config.projects.find((item) => item.id === selectedId); if (!project) throw new Error('Projeto não encontrado.');
-  const active = db.activeTask(project.id);
-  const preferences = chatId !== undefined ? preferencesForChat(chatId) : undefined;
-  const threadId = active?.threadId || await codex.startOrResume(db.getSession(project.id)?.threadId, project.cwd, preferences?.model || config.codexModel);
-  db.saveSession(project.id, threadId);
-  const taskId = db.createTask(project.id, threadId, text, chatId); if (chatId !== undefined) lastTaskByChat.set(chatId, taskId); db.addEvent(taskId, 'input', text);
-  if (active) { await notifyTask(taskId, `Adicionada à fila atrás da tarefa ${active.id}.`); return { taskId }; }
-  await startTask(taskId); return { taskId };
+  const previous = projectSubmissionLocks.get(project.id) || Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  projectSubmissionLocks.set(project.id, current);
+  await previous;
+  try {
+    const active = db.activeTask(project.id);
+    const preferences = chatId !== undefined ? preferencesForChat(chatId) : undefined;
+    const session = active
+      ? { threadId: active.threadId, recoveredFromWriterConflict: false }
+      : await codex.startOrResume(db.getSession(project.id)?.threadId, project.cwd, preferences?.model || config.codexModel);
+    const threadId = session.threadId;
+    db.saveSession(project.id, threadId);
+    const taskId = db.createTask(project.id, threadId, text, chatId); if (chatId !== undefined) lastTaskByChat.set(chatId, taskId); db.addEvent(taskId, 'input', text);
+    if (session.recoveredFromWriterConflict) {
+      db.addEvent(taskId, 'status', 'Sessão anterior indisponível por conflito de escritor; uma nova sessão foi criada automaticamente.');
+      await notifyTask(taskId, 'A sessão anterior estava bloqueada; uma nova sessão foi criada automaticamente.');
+    }
+    if (active) { await notifyTask(taskId, `Adicionada à fila atrás da tarefa ${active.id}.`); return { taskId }; }
+    await startTask(taskId); return { taskId };
+  } finally {
+    release();
+    if (projectSubmissionLocks.get(project.id) === current) projectSubmissionLocks.delete(project.id);
+  }
 }
 
 async function handleApprovalCallback(update: TelegramUpdate, chatId: number): Promise<void> {
@@ -158,5 +176,10 @@ if (config.telegramToken && config.allowedUserId !== undefined) { telegram = new
 const http = startHttp(config, db, (text, projectId) => submitTask(text, projectId));
 const controller = new AbortController(); process.once('SIGINT', () => controller.abort()); process.once('SIGTERM', () => controller.abort());
 console.log(`Codex Telegram Bridge ativo em http://${config.httpHost}:${config.httpPort}${telegram ? ' (Telegram controlador habilitado)' : ' (Telegram não configurado)'}`);
-if (telegram) await telegram.poll(controller.signal); else await new Promise<void>((resolve) => controller.signal.addEventListener('abort', () => resolve(), { once: true }));
-http.close(); db.close();
+try {
+  if (telegram) await telegram.poll(controller.signal); else await new Promise<void>((resolve) => controller.signal.addEventListener('abort', () => resolve(), { once: true }));
+} finally {
+  http.close();
+  codex.close();
+  db.close();
+}
