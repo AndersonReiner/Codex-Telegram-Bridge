@@ -1,7 +1,8 @@
 import type { Config } from './config.js';
 import type { CodexPreferences, PermissionLevel, ReasoningEffort } from './types.js';
 
-type TelegramUpdate = { update_id: number; message?: { chat: { id: number }; from?: { id: number }; text?: string }; callback_query?: { id: string; data?: string; from: { id: number }; message?: { chat: { id: number }; message_id: number } } };
+export type TelegramAudio = { file_id: string; duration: number; file_size?: number };
+type TelegramUpdate = { update_id: number; message?: { chat: { id: number }; from?: { id: number }; text?: string; voice?: TelegramAudio; audio?: TelegramAudio }; callback_query?: { id: string; data?: string; from: { id: number }; message?: { chat: { id: number }; message_id: number } } };
 type ReplyMarkup = { inline_keyboard?: Array<Array<{ text: string; callback_data?: string }>>; keyboard?: string[][]; resize_keyboard?: boolean; one_time_keyboard?: boolean };
 export class TelegramClient {
   private offset = 0;
@@ -10,6 +11,27 @@ export class TelegramClient {
     for (let index = 0; index < text.length || index === 0; index += 3900) {
       await this.call('sendMessage', { chat_id: chatId, text: text.slice(index, index + 3900), ...(index === 0 && replyMarkup ? { reply_markup: replyMarkup } : {}) });
     }
+  }
+  async downloadAudio(fileId: string, maxBytes: number): Promise<Buffer> {
+    const file = await this.call('getFile', { file_id: fileId }) as { file_path?: string; file_size?: number };
+    if (!file.file_path || (file.file_size ?? 0) > maxBytes) throw new Error('Áudio indisponível ou maior que o limite de 10 MB.');
+    try {
+      const response = await fetch(`https://api.telegram.org/file/bot${this.config.telegramToken}/${file.file_path}`, { signal: AbortSignal.timeout(30_000), redirect: 'error' });
+      if (!response.ok || !response.body) throw new Error('download');
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxBytes) throw new Error('size');
+          chunks.push(value);
+        }
+      } finally { await reader.cancel(); }
+      return Buffer.concat(chunks);
+    } catch { throw new Error('Não foi possível baixar o áudio dentro do limite de 10 MB e 30 segundos.'); }
   }
   async sendProjectMenu(chatId: number, selectedId: string): Promise<void> {
     const rows = this.config.projects.map((project) => [{ text: `${project.id === selectedId ? '✅ ' : ''}${project.name}`, callback_data: `project:${project.id}` }]);

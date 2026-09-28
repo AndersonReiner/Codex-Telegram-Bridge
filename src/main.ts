@@ -1,3 +1,4 @@
+import { AudioController } from './audio.js';
 import { mkdirSync } from 'node:fs';
 import { loadConfig, loadDotEnv } from './config.js';
 import { Database } from './database.js';
@@ -14,6 +15,7 @@ const recoveredTasks = db.markRunningTasksUnknown();
 if (recoveredTasks > 0) console.warn(`[recovery] ${recoveredTasks} tarefa(s) ficaram indeterminadas; nenhuma foi reexecutada.`);
 
 let telegram: TelegramClient | undefined;
+let audio: AudioController | undefined;
 const selectedProjectByChat = new Map<number, string>();
 const preferencesByChat = new Map<number, CodexPreferences>();
 const lastTaskByChat = new Map<number, number>();
@@ -182,15 +184,21 @@ async function handlePreferencesCallback(update: TelegramUpdate, chatId: number)
 async function handleTelegram(update: TelegramUpdate): Promise<void> {
   const chatId = update.message?.chat.id ?? update.callback_query?.message?.chat.id; if (chatId === undefined || !telegram) return;
   if (update.callback_query) {
+    if (update.callback_query.from.id !== config.allowedUserId || (config.allowedChatId !== undefined && chatId !== config.allowedChatId)) { await telegram.answerCallback(update.callback_query.id, 'Acesso não autorizado.'); return; }
+    if (update.callback_query.data?.startsWith('audio:')) { await audio?.callback(update, chatId); return; }
     if (update.callback_query.data?.startsWith('approval:')) await handleApprovalCallback(update, chatId);
     else if (update.callback_query.data?.startsWith('preferences:')) await handlePreferencesCallback(update, chatId);
     else await handleProjectCallback(update, chatId);
     return;
   }
-  const message = update.message!; const text = message.text?.trim(); if (!text || !db.claimUpdate(update.update_id)) return;
+  const message = update.message!; const text = message.text?.trim(); if ((!text && !message.voice && !message.audio) || !db.claimUpdate(update.update_id)) return;
   if (message.from?.id !== config.allowedUserId || (config.allowedChatId !== undefined && chatId !== config.allowedChatId)) { await telegram.send(chatId, 'Acesso não autorizado.'); return; }
   await flushPendingNotifications(chatId);
   if (!selectedProjectByChat.has(chatId)) selectedProjectByChat.set(chatId, config.projects[0].id); const selectedId = selectedProjectByChat.get(chatId)!;
+  const recording = message.voice || message.audio;
+  if (recording) { await audio?.receive(chatId, recording, selectedId); return; }
+  if (!text) return;
+  if (await audio?.correct(chatId, text)) return;
   if (text === '/start') { await telegram.send(chatId, 'Codex Telegram Bridge conectado. Use o menu abaixo para selecionar projetos e acompanhar tarefas.'); await telegram.sendMainMenu(chatId); return; }
   if (text === '/projetos' || text === 'Projetos') { await telegram.sendProjectMenu(chatId, selectedId); return; }
   if (text === '/preferencias' || text === 'Preferências') { await telegram.sendPreferencesMenu(chatId, preferencesForChat(chatId)); return; }
@@ -204,17 +212,18 @@ async function handleTelegram(update: TelegramUpdate): Promise<void> {
   if (text === 'Resumo' || text.startsWith('/resumo')) { const match = text.match(/^\/resumo(?:\s+(\d+))?$/); const id = match?.[1] ? Number(match[1]) : lastTaskByChat.get(chatId); const summary = id ? db.taskSummary(id) : undefined; if (!summary) { await telegram.send(chatId, 'Nenhuma tarefa para resumir.'); return; } const task = summary.task as any; const events = (summary.events as any[]).filter((event) => ['input', 'text', 'status', 'error', 'approval'].includes(event.kind)).slice(-10); await telegram.send(chatId, `TAREFA ${task.id}\nPROJETO: ${task.projectId}\nESTADO: ${task.status}\n\nOBJETIVO\n${task.text}\n\nEVENTOS\n${events.map((event) => `• ${event.text}`).join('\n') || 'Nenhum evento.'}`); return; }
   if (text.startsWith('/cancelar ')) { const id = Number(text.slice(10)); const task = Number.isInteger(id) ? db.getTask(id) : undefined; if (!task || !['running', 'waiting_user'].includes(task.status)) { await telegram.send(chatId, 'Tarefa não encontrada ou não está executando.'); return; } try { await codex.interrupt(task.threadId); db.setTaskStatus(task.id, 'interrupted'); await telegram.send(chatId, `Interrupção solicitada para a tarefa ${task.id}.`); } catch (error) { await telegram.send(chatId, `Falha ao interromper: ${(error as Error).message}`); } return; }
   if (text.startsWith('/responder ')) { const parts = text.slice(11).trim().split(/\s+/); const id = parts.shift(); const answer = parts.join(' '); const approval = id ? db.getApproval(id) : undefined; if (!approval || approval.status !== 'pending' || !['tool/requestUserInput', 'item/tool/requestUserInput'].includes(approval.method) || !answer) { await telegram.send(chatId, 'Resposta inválida. Use /responder <id> <resposta>.'); return; } const params = JSON.parse(approval.params) as any; const questionId = params.questions?.[0]?.id; if (!questionId || !db.setApprovalStatus(approval.id, 'accepted')) { await telegram.send(chatId, 'Essa pergunta já foi respondida.'); return; } try { await codex.respond(requestIdValue(approval.id), { answers: { [questionId]: { answers: [answer] } } }); if (approval.taskId) db.setTaskStatus(approval.taskId, 'running'); await telegram.send(chatId, 'Resposta encaminhada ao Codex.'); } catch (error) { await telegram.send(chatId, `Falha ao responder: ${(error as Error).message}`); } return; }
-  if (text === '/ajuda' || text === 'Ajuda') { await telegram.send(chatId, '/start — conectar e abrir menu\n/projetos — escolher projeto pelos botões\n/usar <id> — compatibilidade por texto\n/nova — iniciar nova sessão\n/preferencias — escolher modelo e raciocínio\n/permissoes — escolher nível de permissão\n/status — ver tarefas e estados\n/fila — ver fila do projeto\n/sessoes — listar sessões\n/retomar <taskId> — retomar sessão\n/resumo [taskId] — resumir tarefa\n/responder <id> <resposta> — responder ao Codex\n/cancelar <taskId> — interromper tarefa\nEnvie texto livre para controlar o Codex.'); return; }
+  if (text === '/ajuda' || text === 'Ajuda') { await telegram.send(chatId, '/start — conectar e abrir menu\n/projetos — escolher projeto pelos botões\n/usar <id> — compatibilidade por texto\n/nova — iniciar nova sessão\n/preferencias — escolher modelo e raciocínio\n/permissoes — escolher nível de permissão\n/status — ver tarefas e estados\n/fila — ver fila do projeto\n/sessoes — listar sessões\n/retomar <taskId> — retomar sessão\n/resumo [taskId] — resumir tarefa\n/responder <id> <resposta> — responder ao Codex\n/cancelar <taskId> — interromper tarefa\nEnvie texto livre ou áudio de até 2 minutos para controlar o Codex. Áudios precisam de confirmação após a transcrição.'); return; }
   try { await submitTask(text, selectedId, chatId); } catch (error) { await telegram.send(chatId, `Não foi possível iniciar: ${(error as Error).message}`); }
 }
 
-if (config.telegramToken && config.allowedUserId !== undefined) { telegram = new TelegramClient(config, handleTelegram); await telegram.setCommands().catch((error) => console.warn(`[telegram] não foi possível registrar comandos: ${(error as Error).message}`)); }
+if (config.telegramToken && config.allowedUserId !== undefined) { telegram = new TelegramClient(config, handleTelegram); audio = new AudioController(config, telegram, submitTask); await telegram.setCommands().catch((error) => console.warn(`[telegram] não foi possível registrar comandos: ${(error as Error).message}`)); }
 const http = startHttp(config, db, (text, projectId) => submitTask(text, projectId));
 const controller = new AbortController(); process.once('SIGINT', () => controller.abort()); process.once('SIGTERM', () => controller.abort());
 console.log(`Codex Telegram Bridge ativo em http://${config.httpHost}:${config.httpPort}${telegram ? ' (Telegram controlador habilitado)' : ' (Telegram não configurado)'}`);
 try {
   if (telegram) await telegram.poll(controller.signal); else await new Promise<void>((resolve) => controller.signal.addEventListener('abort', () => resolve(), { once: true }));
 } finally {
+  audio?.close();
   http.close();
   codex.close();
   db.close();

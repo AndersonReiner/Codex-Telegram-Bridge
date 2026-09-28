@@ -11,6 +11,8 @@ export type SettingDefinition = {
 };
 
 export const SETTINGS_CATALOG: SettingDefinition[] = [
+  { key: 'AUDIO_ENABLED', group: 'telegram', label: 'Transcrição local', type: 'string', description: 'Use true para ativar áudio local após executar scripts/setup-audio.sh; false desativa. Sem API paga.', defaultValue: 'false', restartRequired: 'bridge' },
+  { key: 'AUDIO_MODEL', group: 'telegram', label: 'Modelo de áudio local', type: 'string', description: 'tiny, base ou small. Prepare o modelo com scripts/setup-audio.sh antes de selecionar.', defaultValue: 'base', restartRequired: 'bridge' },
   { key: 'TELEGRAM_BOT_TOKEN', group: 'telegram', label: 'Token do bot', type: 'secret', description: 'Credencial usada para acessar a Bot API.', restartRequired: 'bridge' },
   { key: 'TELEGRAM_ALLOWED_USER_ID', group: 'telegram', label: 'Usuário autorizado', type: 'number', description: 'ID numérico do usuário que pode controlar o bot.', restartRequired: 'bridge' },
   { key: 'TELEGRAM_ALLOWED_CHAT_ID', group: 'telegram', label: 'Chat autorizado', type: 'number', description: 'Restrição opcional para um chat específico.', restartRequired: 'bridge' },
@@ -38,6 +40,8 @@ export function settingsSchema(): { settings: SettingDefinition[]; readOnly: tru
 
 export function settingsSnapshot(config: Config): { settings: Array<SettingDefinition & { configured: boolean; value?: unknown }>; readOnly: true } {
   const values: Record<string, unknown> = {
+    AUDIO_ENABLED: String(config.audioEnabled ?? false),
+    AUDIO_MODEL: config.audioModel || 'base',
     TELEGRAM_BOT_TOKEN: { configured: Boolean(config.telegramToken) },
     TELEGRAM_ALLOWED_USER_ID: config.allowedUserId,
     TELEGRAM_ALLOWED_CHAT_ID: config.allowedChatId,
@@ -90,6 +94,11 @@ export function validateSettingsDraft(draft: SettingsDraft): SettingsValidation 
   const errors: SettingsValidation['errors'] = [];
   const warnings: string[] = [];
   for (const key of Object.keys(draft)) if (!knownKeys.has(key)) errors.push({ key, message: 'Parâmetro não reconhecido.' });
+
+  const audioEnabled = textValue(draft, 'AUDIO_ENABLED');
+  if (audioEnabled !== undefined && !['true', 'false'].includes(audioEnabled)) errors.push({ key: 'AUDIO_ENABLED', message: 'Use true ou false.' });
+  const audioModel = textValue(draft, 'AUDIO_MODEL');
+  if (audioModel !== undefined && !['tiny', 'base', 'small'].includes(audioModel)) errors.push({ key: 'AUDIO_MODEL', message: 'Use tiny, base ou small.' });
 
   const projects = addJsonError(errors, draft, 'PROJECTS_JSON', 'JSON inválido.');
   if (projects !== undefined) {
