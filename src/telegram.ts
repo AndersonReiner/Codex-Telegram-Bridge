@@ -38,7 +38,7 @@ export class TelegramClient {
     await this.send(chatId, 'Selecione o projeto que receberá as próximas tarefas:', { inline_keyboard: rows });
   }
   async sendMainMenu(chatId: number): Promise<void> {
-    await this.send(chatId, 'Menu principal:', { keyboard: [['Projetos', 'Preferências'], ['Status', 'Resumo'], ['Ajuda']], resize_keyboard: true });
+    await this.send(chatId, 'Menu principal:', { keyboard: [['Projetos', 'Preferências'], ['Status', 'Resumo'], ['Skills', 'Ajuda']], resize_keyboard: true });
   }
   async sendPreferencesMenu(chatId: number, preferences: CodexPreferences): Promise<void> {
     await this.send(chatId, this.preferencesText(preferences), { inline_keyboard: [[{ text: '🤖 Escolher modelo', callback_data: 'preferences:models' }], [{ text: '🧠 Nível de raciocínio', callback_data: 'preferences:efforts' }], [{ text: '🔐 Nível de permissão', callback_data: 'preferences:permissions' }]] });
@@ -82,6 +82,7 @@ export class TelegramClient {
     { command: 'retomar', description: 'Retomar uma tarefa ou sessão' },
     { command: 'responder', description: 'Responder pergunta do Codex' },
     { command: 'cancelar', description: 'Interromper tarefa' },
+    { command: 'skills', description: 'Listar skills disponíveis' },
   ] }); }
   async poll(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {

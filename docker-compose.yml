@@ -20,6 +20,7 @@ services:
       - bridge-data:/app/data
       - codex-home:/home/node/.codex
       - ${PROJECTS_HOST_DIR:-./projects}:/workspace/projects
+      - ${CODEX_SKILLS_HOST_DIR:-./skills}:/workspace/skills:ro
     init: true
     restart: unless-stopped
     stop_grace_period: 35s

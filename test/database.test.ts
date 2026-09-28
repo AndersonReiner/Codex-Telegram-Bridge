@@ -9,7 +9,8 @@ test('claimUpdate é idempotente e tarefas são persistidas', () => {
   const dir = mkdtempSync(join(tmpdir(), 'codex-telegram-'));
   const db = new Database(join(dir, 'bridge.sqlite'));
   assert.equal(db.claimUpdate(10), true); assert.equal(db.claimUpdate(10), false);
-  const id = db.createTask('demo', 'thread-1', 'teste'); db.setTaskStatus(id, 'completed');
+  const id = db.createTask('demo', 'thread-1', 'teste', undefined, ['git-commit']); db.setTaskStatus(id, 'completed');
+  assert.deepEqual(db.getTask(id)?.skillNames, ['git-commit']);
   assert.equal((db.status() as any[])[0].status, 'completed');
   db.addApproval('7', id, 'commandExecution/requestApproval', { command: 'npm test' });
   assert.equal(db.getApproval('7')?.taskId, id);

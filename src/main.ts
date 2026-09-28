@@ -5,12 +5,14 @@ import { Database } from './database.js';
 import { CodexClient } from './codex-client.js';
 import { TelegramClient, type TelegramUpdate } from './telegram.js';
 import { startHttp } from './http.js';
+import { SkillCatalog, formatSkillList, parseSkillInvocation } from './skills.js';
 import type { ApprovalDecision, CodexPreferences, PermissionLevel, ReasoningEffort } from './types.js';
 
 loadDotEnv();
 const config = loadConfig();
 mkdirSync('data', { recursive: true });
 const db = new Database(config.dbPath);
+const skills = new SkillCatalog(config.skillsDir);
 const recoveredTasks = db.markRunningTasksUnknown();
 if (recoveredTasks > 0) console.warn(`[recovery] ${recoveredTasks} tarefa(s) ficaram indeterminadas; nenhuma foi reexecutada.`);
 
@@ -61,7 +63,7 @@ async function flushPendingNotifications(chatId: number): Promise<void> {
   notificationFlushes.set(chatId, current);
   try { await current; } finally { if (notificationFlushes.get(chatId) === current) notificationFlushes.delete(chatId); }
 }
-async function startTask(taskId: number): Promise<void> { const task = db.getTask(taskId); if (!task) return; const project = config.projects.find((item) => item.id === task.projectId); progressByTask.set(taskId, 0); db.setTaskStatus(taskId, 'running'); taskByThread.set(task.threadId, taskId); await notifyTask(taskId, '[0%] Execução iniciada.'); try { await codex.turn(task.threadId, `${task.text}${progressContract}`, task.chatId !== undefined ? preferencesForChat(task.chatId) : undefined, project?.cwd); } catch (error) { db.setTaskStatus(taskId, 'failed'); const message = `[${progressByTask.get(taskId) ?? 0}%] Falha ao iniciar: ${(error as Error).message}`; db.addEvent(taskId, 'error', message); await notifyTask(taskId, message); } }
+async function startTask(taskId: number): Promise<void> { const task = db.getTask(taskId); if (!task) return; const project = config.projects.find((item) => item.id === task.projectId); progressByTask.set(taskId, 0); db.setTaskStatus(taskId, 'running'); taskByThread.set(task.threadId, taskId); await notifyTask(taskId, '[0%] Execução iniciada.'); try { const prompt = skills.buildPrompt(task.skillNames, task.text); await codex.turn(task.threadId, `${prompt}${progressContract}`, task.chatId !== undefined ? preferencesForChat(task.chatId) : undefined, project?.cwd); } catch (error) { db.setTaskStatus(taskId, 'failed'); const message = `[${progressByTask.get(taskId) ?? 0}%] Falha ao iniciar: ${(error as Error).message}`; db.addEvent(taskId, 'error', message); await notifyTask(taskId, message); } }
 async function startNext(projectId: string): Promise<void> { const next = db.nextQueued(projectId); if (next) await startTask(next.id); }
 
 const codex = new CodexClient(config.codexCommand, (event) => {
@@ -95,6 +97,8 @@ codex.onApproval((id, method, params) => {
 });
 
 async function submitTask(text: string, projectId?: string, chatId?: number): Promise<{ taskId: number }> {
+  const invocation = parseSkillInvocation(text);
+  skills.resolve(invocation.skillNames);
   const selectedId = projectId || (chatId !== undefined ? selectedProjectByChat.get(chatId) : undefined) || config.projects[0].id;
   const project = config.projects.find((item) => item.id === selectedId); if (!project) throw new Error('Projeto não encontrado.');
   const previous = projectSubmissionLocks.get(project.id) || Promise.resolve();
@@ -110,7 +114,7 @@ async function submitTask(text: string, projectId?: string, chatId?: number): Pr
       : await codex.startOrResume(db.getSession(project.id)?.threadId, project.cwd, preferences?.model || config.codexModel);
     const threadId = session.threadId;
     db.saveSession(project.id, threadId);
-    const taskId = db.createTask(project.id, threadId, text, chatId); if (chatId !== undefined) lastTaskByChat.set(chatId, taskId); db.addEvent(taskId, 'input', text);
+    const taskId = db.createTask(project.id, threadId, invocation.command, chatId, invocation.skillNames); if (chatId !== undefined) lastTaskByChat.set(chatId, taskId); db.addEvent(taskId, 'input', text);
     if (session.recoveredFromWriterConflict) {
       db.addEvent(taskId, 'status', 'Sessão anterior indisponível por conflito de escritor; uma nova sessão foi criada automaticamente.');
       await notifyTask(taskId, 'A sessão anterior estava bloqueada; uma nova sessão foi criada automaticamente.');
@@ -200,6 +204,7 @@ async function handleTelegram(update: TelegramUpdate): Promise<void> {
   if (!text) return;
   if (await audio?.correct(chatId, text)) return;
   if (text === '/start') { await telegram.send(chatId, 'Codex Telegram Bridge conectado. Use o menu abaixo para selecionar projetos e acompanhar tarefas.'); await telegram.sendMainMenu(chatId); return; }
+  if (text === '/skills' || text === 'Skills') { await telegram.send(chatId, formatSkillList(skills.list())); return; }
   if (text === '/projetos' || text === 'Projetos') { await telegram.sendProjectMenu(chatId, selectedId); return; }
   if (text === '/preferencias' || text === 'Preferências') { await telegram.sendPreferencesMenu(chatId, preferencesForChat(chatId)); return; }
   if (text === '/permissoes' || text === 'Permissões') { await telegram.sendPermissionMenu(chatId, preferencesForChat(chatId).permissionLevel || 'workspace'); return; }
@@ -209,10 +214,10 @@ async function handleTelegram(update: TelegramUpdate): Promise<void> {
   if (text === '/fila') { const tasks = (db.tasks(selectedId) as any[]).filter((task) => ['queued', 'waiting_user', 'unknown'].includes(task.status)); await telegram.send(chatId, tasks.length ? JSON.stringify(tasks, null, 2) : 'Fila vazia.'); return; }
   if (text === '/sessoes') { await telegram.send(chatId, JSON.stringify(db.sessions(selectedId), null, 2)); return; }
   if (text.startsWith('/retomar ')) { const id = Number(text.slice(9)); const task = Number.isInteger(id) ? db.getTask(id) : undefined; if (!task || task.projectId !== selectedId) { await telegram.send(chatId, 'Tarefa não encontrada neste projeto.'); return; } db.saveSession(selectedId, task.threadId); lastTaskByChat.set(chatId, task.id); await telegram.send(chatId, `Sessão da tarefa ${task.id} selecionada. Estado: ${task.status}.`); return; }
-  if (text === 'Resumo' || text.startsWith('/resumo')) { const match = text.match(/^\/resumo(?:\s+(\d+))?$/); const id = match?.[1] ? Number(match[1]) : lastTaskByChat.get(chatId); const summary = id ? db.taskSummary(id) : undefined; if (!summary) { await telegram.send(chatId, 'Nenhuma tarefa para resumir.'); return; } const task = summary.task as any; const events = (summary.events as any[]).filter((event) => ['input', 'text', 'status', 'error', 'approval'].includes(event.kind)).slice(-10); await telegram.send(chatId, `TAREFA ${task.id}\nPROJETO: ${task.projectId}\nESTADO: ${task.status}\n\nOBJETIVO\n${task.text}\n\nEVENTOS\n${events.map((event) => `• ${event.text}`).join('\n') || 'Nenhum evento.'}`); return; }
+  if (text === 'Resumo' || text.startsWith('/resumo')) { const match = text.match(/^\/resumo(?:\s+(\d+))?$/); const id = match?.[1] ? Number(match[1]) : lastTaskByChat.get(chatId); const summary = id ? db.taskSummary(id) : undefined; if (!summary) { await telegram.send(chatId, 'Nenhuma tarefa para resumir.'); return; } const task = summary.task as any; const events = (summary.events as any[]).filter((event) => ['input', 'text', 'status', 'error', 'approval'].includes(event.kind)).slice(-10); const selectedSkills = task.skillNames?.length ? task.skillNames.map((name: string) => `@${name}`).join(' ') : 'Nenhuma'; await telegram.send(chatId, `TAREFA ${task.id}\nPROJETO: ${task.projectId}\nESTADO: ${task.status}\nSKILLS: ${selectedSkills}\n\nOBJETIVO\n${task.text}\n\nEVENTOS\n${events.map((event) => `• ${event.text}`).join('\n') || 'Nenhum evento.'}`); return; }
   if (text.startsWith('/cancelar ')) { const id = Number(text.slice(10)); const task = Number.isInteger(id) ? db.getTask(id) : undefined; if (!task || !['running', 'waiting_user'].includes(task.status)) { await telegram.send(chatId, 'Tarefa não encontrada ou não está executando.'); return; } try { await codex.interrupt(task.threadId); db.setTaskStatus(task.id, 'interrupted'); await telegram.send(chatId, `Interrupção solicitada para a tarefa ${task.id}.`); } catch (error) { await telegram.send(chatId, `Falha ao interromper: ${(error as Error).message}`); } return; }
   if (text.startsWith('/responder ')) { const parts = text.slice(11).trim().split(/\s+/); const id = parts.shift(); const answer = parts.join(' '); const approval = id ? db.getApproval(id) : undefined; if (!approval || approval.status !== 'pending' || !['tool/requestUserInput', 'item/tool/requestUserInput'].includes(approval.method) || !answer) { await telegram.send(chatId, 'Resposta inválida. Use /responder <id> <resposta>.'); return; } const params = JSON.parse(approval.params) as any; const questionId = params.questions?.[0]?.id; if (!questionId || !db.setApprovalStatus(approval.id, 'accepted')) { await telegram.send(chatId, 'Essa pergunta já foi respondida.'); return; } try { await codex.respond(requestIdValue(approval.id), { answers: { [questionId]: { answers: [answer] } } }); if (approval.taskId) db.setTaskStatus(approval.taskId, 'running'); await telegram.send(chatId, 'Resposta encaminhada ao Codex.'); } catch (error) { await telegram.send(chatId, `Falha ao responder: ${(error as Error).message}`); } return; }
-  if (text === '/ajuda' || text === 'Ajuda') { await telegram.send(chatId, '/start — conectar e abrir menu\n/projetos — escolher projeto pelos botões\n/usar <id> — compatibilidade por texto\n/nova — iniciar nova sessão\n/preferencias — escolher modelo e raciocínio\n/permissoes — escolher nível de permissão\n/status — ver tarefas e estados\n/fila — ver fila do projeto\n/sessoes — listar sessões\n/retomar <taskId> — retomar sessão\n/resumo [taskId] — resumir tarefa\n/responder <id> <resposta> — responder ao Codex\n/cancelar <taskId> — interromper tarefa\nEnvie texto livre ou áudio de até 2 minutos para controlar o Codex. Áudios precisam de confirmação após a transcrição.'); return; }
+  if (text === '/ajuda' || text === 'Ajuda') { await telegram.send(chatId, '/start — conectar e abrir menu\n/projetos — escolher projeto pelos botões\n/usar <id> — compatibilidade por texto\n/nova — iniciar nova sessão\n/preferencias — escolher modelo e raciocínio\n/permissoes — escolher nível de permissão\n/skills — listar skills disponíveis\n/status — ver tarefas e estados\n/fila — ver fila do projeto\n/sessoes — listar sessões\n/retomar <taskId> — retomar sessão\n/resumo [taskId] — resumir tarefa\n/responder <id> <resposta> — responder ao Codex\n/cancelar <taskId> — interromper tarefa\nPara aplicar uma ou mais skills, comece com @nome-da-skill comando. Exemplo: @git-commit prepare um commit.\nEnvie texto livre ou áudio de até 2 minutos para controlar o Codex. Áudios precisam de confirmação após a transcrição.'); return; }
   try { await submitTask(text, selectedId, chatId); } catch (error) { await telegram.send(chatId, `Não foi possível iniciar: ${(error as Error).message}`); }
 }
 
