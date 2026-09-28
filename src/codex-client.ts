@@ -5,6 +5,12 @@ import type { BridgeEvent, CodexPreferences } from './types.js';
 type Pending = { resolve: (value: any) => void; reject: (reason: Error) => void };
 type ApprovalHandler = (requestId: number | string, method: string, params: unknown) => void;
 
+export type SessionStartResult = { threadId: string; recoveredFromWriterConflict: boolean };
+
+export function isThreadWriterConflict(error: unknown): boolean {
+  return /thread-store conflict|active writer/i.test(error instanceof Error ? error.message : String(error));
+}
+
 export class CodexClient {
   private process?: ChildProcess;
   private sequence = 0;
@@ -17,18 +23,33 @@ export class CodexClient {
     if (this.process) return;
     const process = spawn(this.command, ['app-server', '--listen', 'stdio://'], { stdio: ['pipe', 'pipe', 'inherit'] });
     this.process = process;
+    process.once('error', (error) => this.handleProcessExit(process, `não foi possível iniciar o processo: ${error.message}`));
+    process.once('exit', (code, signal) => this.handleProcessExit(process, `processo encerrado (código ${code ?? 'nulo'}, sinal ${signal ?? 'nenhum'})`));
     if (!process.stdout || !process.stdin) throw new Error('Não foi possível abrir o transporte stdio do Codex');
     const lines = createInterface({ input: process.stdout });
     lines.on('line', (line) => this.handle(JSON.parse(line)));
     await this.request('initialize', { clientInfo: { name: 'codex-telegram-bridge', title: 'Codex Telegram Bridge', version: '0.1.0' } });
     this.send({ method: 'initialized', params: {} });
   }
-  async startOrResume(threadId: string | undefined, cwd: string, model?: string): Promise<string> {
+  async startOrResume(threadId: string | undefined, cwd: string, model?: string): Promise<SessionStartResult> {
     await this.connect();
-    const result = threadId
-      ? await this.request('thread/resume', { threadId })
-      : await this.request('thread/start', { cwd, ...(model ? { model } : {}), serviceName: 'codex-telegram-bridge' });
-    return result.thread.id as string;
+    if (!threadId) {
+      const result = await this.request('thread/start', { cwd, ...(model ? { model } : {}), serviceName: 'codex-telegram-bridge' });
+      return { threadId: result.thread.id as string, recoveredFromWriterConflict: false };
+    }
+
+    try {
+      const result = await this.request('thread/resume', { threadId });
+      return { threadId: result.thread.id as string, recoveredFromWriterConflict: false };
+    } catch (error) {
+      if (!isThreadWriterConflict(error)) throw error;
+      // Um escritor órfão ou outra sessão pode manter a thread bloqueada. A
+      // sessão antiga continua preservada no histórico; apenas criamos uma
+      // conversa nova para não bloquear a próxima tarefa.
+      this.onEvent({ type: 'status', text: `Sessão ${threadId} indisponível por conflito de escritor; iniciando uma nova sessão.` });
+      const result = await this.request('thread/start', { cwd, ...(model ? { model } : {}), serviceName: 'codex-telegram-bridge' });
+      return { threadId: result.thread.id as string, recoveredFromWriterConflict: true };
+    }
   }
   async turn(threadId: string, text: string, preferences?: CodexPreferences, cwd?: string): Promise<void> {
     await this.connect();
@@ -43,6 +64,16 @@ export class CodexClient {
   }
   async respond(requestId: number | string, decision: unknown): Promise<void> { this.send({ id: requestId, result: decision }); }
   async interrupt(threadId: string, turnId?: string): Promise<void> { await this.request('turn/interrupt', { threadId, ...(turnId ? { turnId } : {}) }); }
+  close(): void {
+    const process = this.process;
+    if (!process) return;
+    this.process = undefined;
+    const error = new Error('Codex App Server encerrado junto com o bridge');
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+    this.agentBuffers.clear();
+    if (!process.killed) process.kill('SIGTERM');
+  }
   private request(method: string, params: unknown): Promise<any> {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.send({ method, id, params }); });
@@ -51,6 +82,15 @@ export class CodexClient {
     const process = this.process;
     if (!process?.stdin?.writable) throw new Error('Codex App Server não está conectado');
     process.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+  private handleProcessExit(process: ChildProcess, reason: string): void {
+    if (this.process !== process) return;
+    this.process = undefined;
+    this.agentBuffers.clear();
+    const error = new Error(`Codex App Server ${reason}`);
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+    this.onEvent({ type: 'error', text: error.message });
   }
   private handle(message: any): void {
     if (typeof message.id === 'number' && this.pending.has(message.id)) {

@@ -225,7 +225,7 @@ command -v codex
 
 Complete o login indicado pelo CLI. Em uma máquina sem navegador, consulte `codex login --help`; a versão local também oferece `codex login --device-auth`. Para autenticação por chave, o CLI local aceita `printenv OPENAI_API_KEY | codex login --with-api-key`, se essa for a modalidade escolhida.
 
-O CLI observado foi **0.157.0**. A instalação sem versão fixa pode instalar outra versão: confirme a compatibilidade com os contratos e rode uma tarefa de aceitação. O bridge não instala o Codex como dependência do pacote e não faz login por conta própria.
+O CLI observado foi **0.158.0**, mesma versão fixada na imagem Docker. A instalação sem versão fixa pode instalar outra versão: confirme a compatibilidade com os contratos e rode uma tarefa de aceitação. O bridge não faz login por conta própria.
 
 Instale também as ferramentas exigidas pelos projetos de destino: Git, Java, Python, Docker ou outras, conforme cada projeto. Elas não são fornecidas pelo bridge.
 
@@ -325,6 +325,57 @@ No Telegram, envie `/start`, escolha **Projetos**, selecione o diretório e envi
 
 Para usar apenas a web, deixe token e IDs vazios. `PROJECTS_JSON`, Node e Codex continuam necessários para executar tarefas. Aprovações de tarefas originadas na web não possuem interface de resposta implementada.
 
+## Execução em container Docker
+
+A imagem inclui o bridge compilado, o Codex CLI fixado em `0.158.0`, Python com
+`faster-whisper` e o modelo de transcrição escolhido no build. O banco e a
+autenticação do Codex ficam fora da imagem, em volumes persistentes. Os diretórios
+dos projetos também são montados do host; eles não são copiados para a imagem.
+
+Prepare um ambiente Docker separado:
+
+```bash
+cp .env.docker.example .env.docker
+mkdir -p projects/demo
+# Edite .env.docker; PROJECTS_JSON deve usar caminhos dentro do container,
+# normalmente /workspace/projects/<nome>.
+docker compose --env-file .env.docker build
+docker compose --env-file .env.docker up -d
+curl --fail http://127.0.0.1:8787/health
+docker compose --env-file .env.docker logs -f bridge
+```
+
+O `PROJECTS_HOST_DIR` define a pasta do host montada em `/workspace/projects`.
+Para projetos que ficam fora do checkout, use um caminho absoluto no host e
+mantenha os `cwd` de `PROJECTS_JSON` apontando para `/workspace/projects/...`.
+O `HTTP_HOST` interno precisa permanecer `0.0.0.0`; `HOST_HTTP_PORT` define a
+porta exposta no host.
+
+Há duas formas de autenticar o Codex dentro do container. Pode-se definir
+`OPENAI_API_KEY` em `.env.docker` (sem publicar esse arquivo) ou fazer login no
+volume persistente `codex-home`:
+
+```bash
+docker compose --env-file .env.docker run --rm bridge codex login
+```
+
+O `AUDIO_MODEL` é usado tanto no build quanto na execução. Para usar `tiny` ou
+`small`, altere o valor em `.env.docker` e reconstrua a imagem; o modelo fica em
+`/opt/whisper-models`, separado do volume do SQLite. A transcrição só é ativada
+com `AUDIO_ENABLED=true`.
+
+Para gerar uma tag própria e deixar a publicação no Docker Hub para a etapa
+seguinte:
+
+```bash
+docker build --build-arg CODEX_VERSION=0.158.0 --build-arg AUDIO_MODEL=base \
+  -t SEU_USUARIO/codex-telegram-bridge:0.1.0 .
+docker run --rm SEU_USUARIO/codex-telegram-bridge:0.1.0 codex --version
+```
+
+Não coloque tokens, `.env.docker`, banco SQLite ou diretórios de projeto no
+contexto de publicação. O `.dockerignore` já exclui esses itens.
+
 ## Configuração completa
 
 | Variável | Obrigatória | Padrão / comportamento |
@@ -337,9 +388,13 @@ Para usar apenas a web, deixe token e IDs vazios. `PROJECTS_JSON`, Node e Codex 
 | `CODEX_MODEL` | Não | Modelo usado para novas sessões sem preferência de chat |
 | `CODEX_MODELS_JSON` | Não | `[]`; lista manual de IDs de modelos, com `CODEX_MODEL` acrescido se definido |
 | `CODEX_REASONING_EFFORTS_JSON` | Não | `["low","medium","high"]`; também aceita `xhigh` |
+| `OPENAI_API_KEY` | Alternativa ao login do Codex | Herdada pelo processo `codex`; nunca coloque a chave em uma imagem ou no Git |
 | `DB_PATH` | Não | `./data/bridge.sqlite`, relativo ao diretório de execução |
 | `HTTP_HOST` | Não | `127.0.0.1` |
 | `HTTP_PORT` | Não | `8787` |
+| `AUDIO_ENABLED` | Não | `false`; requer Telegram configurado para receber voz/áudio |
+| `AUDIO_MODEL` | Não | `base`; aceita `tiny`, `base` ou `small` |
+| `AUDIO_MODEL_CACHE_DIR` | Não | `data/whisper-models` localmente; `/opt/whisper-models` na imagem Docker |
 | `BRIDGE_RESTART_DELAY_MS` | Não | `3000`; usado somente pelo supervisor e lido do ambiente do processo |
 
 `BRIDGE_RESTART_DELAY_MS` precisa ser exportado no shell, por exemplo `BRIDGE_RESTART_DELAY_MS=5000 npm run supervise`. O supervisor não carrega `.env`; o processo filho carrega.
@@ -512,6 +567,7 @@ Estados de tarefa: `queued` (fila), `running` (execução), `waiting_user` (agua
 
 | Comando | Uso |
 |---|---|
+| `./start.sh` | Compila, inicia, registra logs em `data/start.log` e trata `Ctrl+C` |
 | `npm ci` | Instala versões do lockfile |
 | `npm run build` | Compila fontes e testes |
 | `npm start` | Executa `dist/src/main.js`; não compila |
@@ -524,8 +580,14 @@ Estados de tarefa: `queued` (fila), `running` (execução), `waiting_user` (agua
 1. Espere tarefas terminarem, quando possível: reiniciar não é uma pausa recuperável.
 2. No terminal da instância atual, pressione `Ctrl+C` e aguarde a saída. O polling pode aguardar a requisição de até 25 segundos; falhas de rede podem atrasar mais.
 3. Confirme que a porta ficou livre. Em Linux: `ss -ltnp 'sport = :8787'`.
-4. Na raiz, execute `npm run dev`.
+4. Na raiz, execute `./start.sh`.
 5. Confira `/health` e envie `/start` no Telegram para obter o teclado atualizado.
+
+O script precisa estar executável (`chmod +x start.sh`, já aplicado no repositório). Ele mostra os logs no terminal e também os acrescenta em `data/start.log`. `Ctrl+C`, `SIGTERM` e `SIGHUP` são encaminhados à aplicação; se ela não encerrar no prazo padrão de 30 segundos, o processo é finalizado. Para mudar o prazo ou o arquivo de log:
+
+```bash
+BRIDGE_SHUTDOWN_TIMEOUT=45 BRIDGE_LOG_FILE=/tmp/codex-bridge.log ./start.sh
+```
 
 Não abra uma segunda instância para tentar reiniciar a primeira. Além de `EADDRINUSE`, a inicialização já abre o banco e marca tarefas ativas como `unknown` antes de detectar o conflito de porta.
 
@@ -582,6 +644,52 @@ Não edite `dist/` diretamente: é sobrescrito no build. Não edite schemas gera
 
 ## Solução de problemas
 
+### `thread-store conflict: ... already has an active writer`
+
+Esse erro ocorre quando uma sessão persistida do Codex ainda está sendo usada
+por outro processo ou ficou bloqueada após uma interrupção. O bridge trata esse
+caso automaticamente: preserva a thread antiga, inicia uma nova thread no mesmo
+projeto, atualiza a sessão ativa no SQLite e registra a recuperação no log e na
+tarefa. Nenhum histórico é apagado.
+
+Para evitar duas instâncias do bridge, inicie-o pela raiz com:
+
+```bash
+./start.sh
+```
+
+O script usa `data/bridge.lock`; ao pressionar `Ctrl+C`, ele encerra o processo
+filho e libera o lock. Se uma tarefa específica precisar ser abandonada
+manualmente, `/nova` também remove somente a sessão ativa do projeto e mantém
+as tarefas e eventos registrados.
+
+### `EADDRINUSE` na porta 8787
+
+Há outro processo ocupando a porta configurada. Encerre a instância anterior e
+inicie novamente com `./start.sh`. O script impede duplicidade quando as duas
+instâncias são iniciadas por ele.
+
+### `Telegram ... fetch failed`
+
+Esse erro significa falha de transporte entre a máquina e
+`https://api.telegram.org`. Token inválido normalmente retorna uma mensagem da
+API com HTTP 401, não `fetch failed`. O cliente usa timeout e três tentativas
+para cada chamada. Se o erro persistir, valide DNS, proxy, firewall e acesso
+HTTPS:
+
+```bash
+curl --fail-with-body "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"
+```
+
+O painel HTTP local e a execução do Codex podem continuar funcionando sem o
+Telegram; cada notificação faz três tentativas antes de ser registrada como
+falha.
+
+As notificações de tarefas são persistidas na tabela `notifications`. Quando o
+Telegram está indisponível, elas permanecem pendentes no SQLite. Na próxima
+mensagem ou interação por botão do mesmo chat, o bridge tenta enviar a fila
+pendente em ordem e marca cada item como `sent` somente após confirmação da API.
+
 | Sintoma | Verificação e ação |
 |---|---|
 | `PROJECTS_JSON` ausente | Crie `.env` na raiz e execute a aplicação a partir dessa pasta |
@@ -631,3 +739,127 @@ Esses pontos são limites observáveis da implementação, não recursos já res
 - Para opções exatas do Codex instalado: `codex --help`, `codex login --help` e `codex app-server --help`.
 
 Este README descreve o código disponível; o arquivo de conversa contém ideias anteriores e não substitui a implementação como fonte de verdade.
+
+## Áudio no Telegram sem API paga
+
+O bridge pode transcrever mensagens de voz (`voice`) e arquivos de áudio (`audio`)
+recebidos pelo Telegram localmente. Usa os modelos Whisper através do
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper), implementação independente
+com licença MIT. A transcrição não envia o áudio a um provedor nem exige chave
+OpenAI e não cobra por minuto. O processamento usa CPU, memória e energia da
+máquina; para transformar a transcrição em uma tarefa, o acesso ao Codex ainda
+precisa estar autenticado normalmente. A resposta do bot continua em texto.
+
+### Instalação e ativação
+
+Na raiz do projeto, com Python 3.9+ e o módulo `venv` disponível:
+
+```bash
+bash scripts/setup-audio.sh
+```
+
+O script cria `.venv-audio`, instala a versão de faster-whisper fixada em
+`scripts/audio-requirements.txt` e suas dependências e baixa o modelo `base` em `data/whisper-models`.
+A instalação precisa de internet. Depois, a transcrição roda com cache local e
+`HF_HUB_OFFLINE=1`; o áudio não é enviado a um provedor de transcrição.
+O Telegram ainda precisa de internet para receber e baixar mensagens.
+PyAV inclui as bibliotecas de decodificação; não é necessário instalar o executável FFmpeg.
+
+Configure no `.env`:
+
+```dotenv
+AUDIO_ENABLED=true
+AUDIO_MODEL=base
+AUDIO_MODEL_CACHE_DIR=./data/whisper-models
+```
+
+Em container, o Dockerfile já instala as dependências e prepara no build o
+modelo definido por `--build-arg AUDIO_MODEL`. O valor de `AUDIO_MODEL` na
+execução deve ser o mesmo modelo preparado na imagem; para trocar entre `tiny`,
+`base` e `small`, altere o ambiente e reconstrua. O cache pode ser mantido fora
+do volume do banco com:
+
+```dotenv
+AUDIO_MODEL_CACHE_DIR=/opt/whisper-models
+```
+
+Reinicie o bridge pelo procedimento habitual. Os parâmetros de áudio aparecem na
+página `/configuracoes`, que mantém seu comportamento atual de revisão/validação
+sem gravar o `.env`. Para desativar, use `AUDIO_ENABLED=false` e reinicie.
+
+Em máquinas menores, prepare `bash scripts/setup-audio.sh tiny` e configure
+`AUDIO_MODEL=tiny`; o reconhecimento pode ser menos preciso. `small` também é
+aceito, com maior consumo de recursos. A configuração padrão usa CPU, INT8 e duas
+threads; não precisa de GPU.
+
+### Uso
+
+1. Confirme `AUDIO_ENABLED=true`, Telegram configurado e um modelo preparado.
+2. Selecione o projeto no Telegram e envie um áudio em português.
+3. Aguarde a transcrição local. O projeto é fixado no momento do recebimento.
+4. Confira o texto e escolha **Enviar ao Codex**, **Corrigir** ou **Cancelar**.
+5. Ao corrigir, envie o texto completo; uma nova confirmação será apresentada.
+   Use `/cancelar` durante a correção para descartar.
+
+O primeiro teste real pode ser feito assim no host:
+
+```bash
+bash scripts/setup-audio.sh base
+# configure AUDIO_ENABLED=true no .env e reinicie o bridge
+curl --fail http://127.0.0.1:8787/health
+```
+
+Depois, envie uma mensagem de voz curta e nítida ao bot. O resultado esperado é:
+mensagem de transcrição, botões **Enviar ao Codex**, **Corrigir** e **Cancelar**,
+e nenhuma tarefa criada antes da confirmação. No Docker, use `AUDIO_ENABLED=true`
+no `.env.docker`, reconstrua a imagem se o modelo mudar e execute:
+
+```bash
+docker compose --env-file .env.docker up -d
+docker compose --env-file .env.docker logs -f bridge
+```
+
+Áudio enviado pela interface web ou por `POST /commands` não é transcrito: o
+fluxo de áudio está implementado no Telegram. Texto corrigido é reenviado como
+uma instrução comum após a confirmação.
+
+O ciclo de revisão é:
+
+1. O bridge baixa o arquivo do Telegram e valida tamanho/duração.
+2. A transcrição roda localmente com Whisper em CPU e cache offline.
+3. O texto fica em rascunho temporário; nenhuma tarefa é iniciada ainda.
+4. Somente **Enviar ao Codex** chama o fluxo normal de tarefas.
+
+Não envie informações sensíveis em áudio sem considerar que o texto transcrito
+fica registrado como entrada/evento da tarefa no SQLite.
+
+Após a confirmação, o projeto permanece fixado e a tarefa recebe o mesmo
+contrato de progresso das mensagens de texto.
+
+O fluxo não aceita comandos administrativos diretamente da fala: eles viram
+texto de tarefa apenas depois da confirmação.
+
+Em caso de falha, confira primeiro:
+
+- `AUDIO_ENABLED=true` e Telegram habilitado no mesmo processo;
+- correspondência entre `AUDIO_MODEL` e o modelo preparado/cacheado;
+- permissões de escrita no cache local ou no volume `/opt/whisper-models`;
+- logs do bridge e o limite de 10 MB/120 segundos.
+
+O caminho de texto continua disponível durante a transcrição.
+
+Limites: 10 MB, 120 segundos e um áudio em processamento por vez. Outros áudios
+recebem aviso para reenviar; comandos de texto continuam disponíveis durante a
+transcrição. Download tem prazo de 30 segundos; transcrição, de 180 segundos.
+Somente o usuário/chat autorizado pode baixar, transcrever ou confirmar áudios.
+Cliques repetidos não reenviam a mesma revisão. Revisões expiram em 10 minutos,
+são substituídas por um novo áudio e são perdidas ao reiniciar. Falas reconhecidas
+não são interpretadas como comandos administrativos do bot: viram texto de tarefa
+somente após confirmação.
+
+O arquivo temporário usa diretório privado e é removido após sucesso ou erro
+(incluindo timeout). Um encerramento forçado do sistema pode deixar um diretório
+`bridge-audio-*` no temporário do sistema. O texto confirmado é armazenado como
+uma tarefa normal; a prévia também aparece no histórico do Telegram. Não há
+fallback para API paga. Em caso de instalação ausente, cache incompleto, áudio
+inválido ou falha no reconhecimento, o bot orienta reenviar ou usar texto.

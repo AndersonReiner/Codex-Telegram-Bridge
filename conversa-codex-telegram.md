@@ -621,3 +621,17 @@ O comando `/permissoes` abre o menu diretamente. A seleção também está dispo
 ### Lista completa de comandos do Telegram — 26/09/2026
 
 O `setMyCommands` do bot foi alinhado com o fluxo real da aplicação. A lista publicada agora contém: `/start`, `/ajuda`, `/projetos`, `/usar`, `/nova`, `/preferencias`, `/status`, `/fila`, `/resumo`, `/sessoes`, `/retomar`, `/responder` e `/cancelar`. O texto de `/ajuda` foi atualizado com a mesma relação e seus parâmetros.
+
+### Reconciliação inicial do processo Codex — 26/09/2026
+
+Foi iniciado o endurecimento da ponte para falhas do processo `codex app-server`:
+
+- O cliente observa os eventos `error` e `exit` do processo filho.
+- Requisições JSON-RPC que ainda aguardavam resposta são rejeitadas com uma mensagem explícita.
+- O processo encerrado é removido da conexão ativa e os buffers de mensagens narrativas são limpos.
+- Uma próxima operação pode abrir uma nova conexão, sem reutilizar o processo que morreu.
+- O erro é encaminhado ao callback de eventos para que a camada de tarefa possa registrar a falha.
+
+Validação realizada: `npm test` passou com build TypeScript e os três conjuntos de testes existentes.
+
+Pendência desta frente: adicionar um teste de integração com um App Server simulado que encerre o processo enquanto uma requisição estiver pendente, além de reconciliar tarefas que estavam `running` quando o processo caiu.

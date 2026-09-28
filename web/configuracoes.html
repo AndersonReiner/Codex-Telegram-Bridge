@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configurações — Codex Bridge</title>
+    <link rel="stylesheet" href="/configuracoes.css" />
+    <script>try { const theme = localStorage.getItem('bridge-theme') || 'dark'; document.documentElement.dataset.theme = theme; document.documentElement.classList.toggle('dark', theme === 'dark'); } catch { document.documentElement.dataset.theme = 'dark'; document.documentElement.classList.add('dark'); }</script>
+  </head>
+  <body>
+    <div id="settings-root"><p style="padding:2rem">Carregando configurações…</p></div>
+    <noscript>Ative o JavaScript para abrir as configurações do Bridge.</noscript>
+    <script type="module" src="/configuracoes.js"></script>
+  </body>
+</html>

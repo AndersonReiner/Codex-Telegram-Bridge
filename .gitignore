@@ -1,7 +1,12 @@
 node_modules/
 dist/
+test-results/
+playwright-report/
 .env
+.env.docker
 data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+.venv-audio/
+__pycache__/
