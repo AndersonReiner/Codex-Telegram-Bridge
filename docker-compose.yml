@@ -1,0 +1,29 @@
+services:
+  bridge:
+    build:
+      context: .
+      args:
+        CODEX_VERSION: ${CODEX_VERSION:-0.158.0}
+        AUDIO_MODEL: ${AUDIO_MODEL:-base}
+    image: ${BRIDGE_IMAGE:-codex-telegram-bridge:local}
+    env_file:
+      - ${DOCKER_ENV_FILE:-.env.docker}
+    environment:
+      HOME: /home/node
+      DB_PATH: /app/data/bridge.sqlite
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: 8787
+      AUDIO_MODEL_CACHE_DIR: /opt/whisper-models
+    ports:
+      - "${HOST_HTTP_PORT:-8787}:8787"
+    volumes:
+      - bridge-data:/app/data
+      - codex-home:/home/node/.codex
+      - ${PROJECTS_HOST_DIR:-./projects}:/workspace/projects
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 35s
+
+volumes:
+  bridge-data:
+  codex-home:
