@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test("carrega componentes Watermelon reais e os 15 parâmetros sem expor token salvo", async ({
+test("carrega componentes Watermelon reais e os 17 parâmetros sem expor token salvo", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -10,7 +10,7 @@ test("carrega componentes Watermelon reais e os 15 parâmetros sem expor token s
     "fixture-secret-must-never-reach-browser",
   );
   await page.goto("/configuracoes");
-  await expect(page.locator("[data-field]")).toHaveCount(15);
+  await expect(page.locator("[data-field]")).toHaveCount(17);
   await expect(page.locator('[data-slot="card"]').first()).toBeVisible();
   await expect(page.locator("#TELEGRAM_BOT_TOKEN")).toBeDisabled();
   expect(await page.content()).not.toContain(
@@ -147,7 +147,7 @@ test("temas e layout responsivo funcionam em desktop e celular", async ({
   for (const width of [1440, 768, 360]) {
     await page.setViewportSize({ width, height: 960 });
     await page.goto("/configuracoes");
-    await expect(page.locator("[data-field]")).toHaveCount(15);
+    await expect(page.locator("[data-field]")).toHaveCount(17);
     for (const theme of ["light", "dark"]) {
       const toggle = page.getByRole("button", {
         name: `Ativar tema ${theme === "light" ? "claro" : "escuro"}`,

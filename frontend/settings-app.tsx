@@ -321,7 +321,16 @@ export function SettingsApp() {
       "aria-describedby": `${key}-hint${error ? ` ${key}-error` : ""}`,
     };
     let control;
-    if (setting.type === "secret") {
+    if (key === "AUDIO_ENABLED") {
+      control = (
+        <div className="secret-state">
+          <Switch {...common} checked={value === "true"}
+            onCheckedChange={(checked) => update(key, String(checked))}
+            aria-label="Transcrição local" />
+          <span>{value === "true" ? "Ativada no rascunho" : "Desativada no rascunho"}</span>
+        </div>
+      );
+    } else if (setting.type === "secret") {
       control = (
         <div className="secret-editor">
           <div className="secret-state">
@@ -1212,7 +1221,7 @@ export function SettingsApp() {
                   ? "Os campos voltarão aos valores carregados ao abrir esta página. O servidor não será alterado."
                   : modal === "reveal"
                     ? "Somente o valor que você digitou será exibido, por até 15 segundos. Verifique se sua tela não está sendo compartilhada."
-                    : "Edite, revise e valide os 15 parâmetros do Bridge. O rascunho fica apenas na memória desta página."}
+                    : "Edite, revise e valide os parâmetros do Bridge. O rascunho fica apenas na memória desta página."}
               </DialogDescription>
             </DialogHeader>
             {modal === "help" && (

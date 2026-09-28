@@ -8,6 +8,8 @@ function required(name: string): string {
 }
 
 export type Config = {
+  audioEnabled?: boolean;
+  audioModel?: string;
   telegramToken?: string;
   allowedUserId?: number;
   allowedChatId?: number;
@@ -33,7 +35,12 @@ export function loadConfig(): Config {
   const codexModels = [...new Set((configuredModels as string[]).map((model) => model.trim()).concat(codexModel ? [codexModel] : []))];
   const configuredEfforts = process.env.CODEX_REASONING_EFFORTS_JSON ? JSON.parse(process.env.CODEX_REASONING_EFFORTS_JSON) as unknown : ['low', 'medium', 'high'];
   if (!Array.isArray(configuredEfforts) || configuredEfforts.some((effort) => !['low', 'medium', 'high', 'xhigh'].includes(String(effort)))) throw new Error('CODEX_REASONING_EFFORTS_JSON contém níveis inválidos');
+  const audioModel = process.env.AUDIO_MODEL || 'base';
+  if (!['tiny', 'base', 'small'].includes(audioModel)) throw new Error('AUDIO_MODEL deve ser tiny, base ou small');
+  if (process.env.AUDIO_ENABLED && !['true', 'false'].includes(process.env.AUDIO_ENABLED)) throw new Error('AUDIO_ENABLED deve ser true ou false');
   return {
+    audioEnabled: process.env.AUDIO_ENABLED === 'true',
+    audioModel,
     telegramToken: process.env.TELEGRAM_BOT_TOKEN || undefined,
     allowedUserId: process.env.TELEGRAM_ALLOWED_USER_ID ? Number(process.env.TELEGRAM_ALLOWED_USER_ID) : undefined,
     allowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID ? Number(process.env.TELEGRAM_ALLOWED_CHAT_ID) : undefined,

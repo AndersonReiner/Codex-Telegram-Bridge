@@ -19,7 +19,7 @@ test('API local expõe saúde, dados e interface web', async () => {
   assert.match(await settingsPage.text(), /settings-root/);
   const settings = await (await fetch(`http://127.0.0.1:${port}/api/settings`)).json() as any;
   assert.equal(settings.readOnly, true);
-  assert.equal(settings.settings.length, 15);
+  assert.equal(settings.settings.length, 17);
   assert.deepEqual(settings.settings.find((item: any) => item.key === 'TELEGRAM_BOT_TOKEN').value, { configured: true });
   const validDraft = await fetch(`http://127.0.0.1:${port}/api/settings/validate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ PROJECTS_JSON: '[{"id":"demo","name":"Demo","cwd":"/tmp/demo"}]', HTTP_PORT: '8787', CODEX_MODELS_JSON: '[]', CODEX_REASONING_EFFORTS_JSON: '["low"]' }) });
   assert.equal(validDraft.status, 200); assert.equal((await validDraft.json() as any).valid, true);
