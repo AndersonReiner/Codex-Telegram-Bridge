@@ -1,9 +1,14 @@
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { extname, join, resolve, sep } from 'node:path';
 import type { Config } from './config.js';
 import type { Database } from './database.js';
+import { openApiDocument } from './openapi.js';
 import { settingsSchema, settingsSnapshot, validateSettingsDraft } from './settings.js';
+
+const require = createRequire(import.meta.url);
+const swaggerUiDirectory = (require('swagger-ui-dist') as { getAbsoluteFSPath: () => string }).getAbsoluteFSPath();
 
 export type CommandHandler = (text: string, projectId?: string) => Promise<{ taskId: number }>;
 
@@ -17,6 +22,9 @@ export function startHttp(config: Config, db: Database, onCommand?: CommandHandl
     if (request.method === 'GET' && pathname === '/configuracoes') { serveStatic('configuracoes.html', response); return; }
     if (request.method === 'GET' && pathname === '/configuracoes.js') { serveStatic('configuracoes.js', response); return; }
     if (request.method === 'GET' && pathname === '/configuracoes.css') { serveStatic('configuracoes.css', response); return; }
+    if (request.method === 'GET' && (pathname === '/docs' || pathname === '/docs/')) { serveSwaggerUi(response); return; }
+    if (request.method === 'GET' && pathname === '/openapi.json') { sendJson(response, openApiDocument); return; }
+    if (request.method === 'GET' && pathname.startsWith('/docs/')) { serveSwaggerAsset(pathname.slice('/docs/'.length), response); return; }
     response.setHeader('content-type', 'application/json; charset=utf-8');
     response.setHeader('cache-control', 'no-store');
     if (request.method === 'GET' && request.url === '/health') { response.end(JSON.stringify({ status: 'ok' })); return; }
@@ -35,6 +43,51 @@ export function startHttp(config: Config, db: Database, onCommand?: CommandHandl
   });
   server.listen(config.httpPort, config.httpHost);
   return server;
+}
+
+function serveSwaggerUi(response: import('node:http').ServerResponse): void {
+  response.statusCode = 200;
+  response.setHeader('content-type', 'text/html; charset=utf-8');
+  response.setHeader('cache-control', 'no-cache');
+  response.end(`<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex Telegram Bridge API</title>
+    <link rel="stylesheet" href="/docs/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="/docs/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: '/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: 'BaseLayout'
+      });
+    </script>
+  </body>
+</html>`);
+}
+
+function serveSwaggerAsset(name: string, response: import('node:http').ServerResponse): void {
+  if (!name || name.includes('/') || name.includes('\\')) { response.statusCode = 404; response.end('Not found'); return; }
+  const root = resolve(swaggerUiDirectory);
+  const path = resolve(root, name);
+  if (!path.startsWith(`${root}${sep}`) || !existsSync(path) || !statSync(path).isFile()) { response.statusCode = 404; response.end('Not found'); return; }
+  response.setHeader('cache-control', 'public, max-age=3600');
+  response.setHeader('content-type', swaggerContentType(path));
+  createReadStream(path).pipe(response);
+}
+
+function sendJson(response: import('node:http').ServerResponse, value: unknown): void {
+  response.statusCode = 200;
+  response.setHeader('content-type', 'application/json; charset=utf-8');
+  response.setHeader('cache-control', 'no-store');
+  response.end(JSON.stringify(value));
 }
 
 async function handleSettingsValidation(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse): Promise<void> {
@@ -80,4 +133,15 @@ function serveStatic(name: string, response: import('node:http').ServerResponse)
   response.setHeader('content-type', types[extname(path)] || 'application/octet-stream');
   response.setHeader('cache-control', 'no-cache');
   createReadStream(path).pipe(response);
+}
+
+function swaggerContentType(path: string): string {
+  const types: Record<string, string> = {
+    '.css': 'text/css; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.map': 'application/json; charset=utf-8',
+    '.png': 'image/png',
+  };
+  return types[extname(path)] || 'application/octet-stream';
 }

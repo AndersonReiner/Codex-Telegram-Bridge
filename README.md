@@ -2,7 +2,7 @@
 
 Controle tarefas do Codex no seu computador pelo Telegram e acompanhe a execução por um painel web local. O bridge recebe instruções, seleciona o diretório de trabalho, inicia ou retoma uma conversa com o Codex App Server e registra tarefas, eventos e aprovações em SQLite.
 
-Documentação da implementação disponível em **26/09/2026**, versão do pacote **0.1.0**. O sistema é um MVP de uso pessoal; as limitações operacionais estão descritas ao final. Os exemplos de terminal usam Bash, em Linux ou WSL. Valores como `SEU_USUARIO` são exemplos que precisam ser substituídos.
+Documentação da implementação disponível em **28/09/2026**, versão do pacote **0.1.0**. O sistema é um MVP de uso pessoal; as limitações operacionais estão descritas ao final. Os exemplos de terminal usam Bash, em Linux ou WSL. Valores como `SEU_USUARIO` são exemplos que precisam ser substituídos.
 
 ## Sumário
 
@@ -33,6 +33,7 @@ Recursos presentes no código:
 - Continuidade de sessão por projeto e fila básica de tarefas por projeto.
 - Aprovação ou recusa de solicitações suportadas do Codex por botões.
 - Resposta textual a perguntas, consulta de tarefas, resumo e solicitação de interrupção.
+- Catálogo de skills locais com `/skills` e invocação por prefixo `@nome-da-skill`.
 - Painel web com envio de instruções, projetos, tarefas, eventos, tema claro/escuro e página Hello World.
 - Supervisor opcional que reinicia o processo do bridge quando ele termina.
 
@@ -101,6 +102,7 @@ Projeto é o diretório cadastrado; sessão é a conversa identificada por `thre
 | Linguagem | TypeScript em modo estrito |
 | Runtime | Node.js, ES Modules |
 | HTTP | `node:http`, sem framework |
+| Documentação HTTP | `swagger-ui-dist`, OpenAPI 3.0.3 em `/docs` e `/openapi.json` |
 | Persistência | `node:sqlite`, `DatabaseSync`, WAL |
 | Integração Codex | Processo filho e mensagens JSON delimitadas por linha |
 | Telegram | `fetch`, `getUpdates`, mensagens e callbacks |
@@ -122,6 +124,8 @@ codex-telegram-bridge/
 │   ├── config.ts                # Leitura do ambiente e do .env
 │   ├── codex-client.ts          # Transporte, turnos, permissões e eventos
 │   ├── telegram.ts              # Bot API e construção dos menus
+│   ├── skills.ts                # Descoberta e carregamento de SKILL.md
+│   ├── openapi.ts               # Contrato OpenAPI dos endpoints HTTP
 │   ├── database.ts              # Criação do banco e consultas
 │   ├── http.ts                  # Rotas JSON e arquivos estáticos
 │   └── types.ts                 # Tipos compartilhados
@@ -299,6 +303,7 @@ CODEX_COMMAND=codex
 CODEX_MODEL=
 CODEX_MODELS_JSON=[]
 CODEX_REASONING_EFFORTS_JSON=["low","medium","high"]
+CODEX_SKILLS_DIR=/home/SEU_USUARIO/.codex/skills
 DB_PATH=./data/bridge.sqlite
 HTTP_HOST=127.0.0.1
 HTTP_PORT=8787
@@ -364,6 +369,14 @@ O `AUDIO_MODEL` é usado tanto no build quanto na execução. Para usar `tiny` o
 `/opt/whisper-models`, separado do volume do SQLite. A transcrição só é ativada
 com `AUDIO_ENABLED=true`.
 
+Para disponibilizar skills no container, defina `CODEX_SKILLS_HOST_DIR` em
+`.env.docker` com o caminho absoluto do host que contém as pastas das skills.
+O Compose monta essa pasta como `/workspace/skills` somente para leitura, e
+`CODEX_SKILLS_DIR=/workspace/skills` faz o bridge procurar cada
+`/workspace/skills/<nome>/SKILL.md`. Se a pasta não for montada, `/skills`
+informará que nenhuma skill foi encontrada; o restante do bridge continuará
+funcionando.
+
 Para gerar uma tag própria e deixar a publicação no Docker Hub para a etapa
 seguinte:
 
@@ -388,6 +401,7 @@ contexto de publicação. O `.dockerignore` já exclui esses itens.
 | `CODEX_MODEL` | Não | Modelo usado para novas sessões sem preferência de chat |
 | `CODEX_MODELS_JSON` | Não | `[]`; lista manual de IDs de modelos, com `CODEX_MODEL` acrescido se definido |
 | `CODEX_REASONING_EFFORTS_JSON` | Não | `["low","medium","high"]`; também aceita `xhigh` |
+| `CODEX_SKILLS_DIR` | Não | `$HOME/.codex/skills`; pasta com subpastas que contenham `SKILL.md` |
 | `OPENAI_API_KEY` | Alternativa ao login do Codex | Herdada pelo processo `codex`; nunca coloque a chave em uma imagem ou no Git |
 | `DB_PATH` | Não | `./data/bridge.sqlite`, relativo ao diretório de execução |
 | `HTTP_HOST` | Não | `127.0.0.1` |
@@ -445,6 +459,7 @@ O padrão do bridge é **Projeto**. A seleção fica em `/permissoes` ou no menu
 | `/usar <id>` | Seleciona projeto por ID; `/usar` sozinho não abre o menu |
 | `/preferencias` / Preferências | Modelo, raciocínio e permissões |
 | `/permissoes` | Abre diretamente a seleção de permissão |
+| `/skills` / Skills | Lista as skills encontradas no `CODEX_SKILLS_DIR` |
 | `/status` / Status | Até 50 tarefas do projeto selecionado, em JSON |
 | `/fila` | Mostra tarefas `queued`, `waiting_user` e `unknown` do projeto |
 | `/sessoes` | Mostra o vínculo de sessão atual do projeto |
@@ -454,6 +469,25 @@ O padrão do bridge é **Projeto**. A seleção fica em `/permissoes` ou no menu
 | `/responder <id> <resposta>` | Responde à primeira pergunta de uma solicitação suportada |
 | `/cancelar <taskId>` | Solicita interrupção de tarefa `running` ou `waiting_user` |
 | Texto comum | Cria uma tarefa ou entra na fila do projeto |
+
+A documentação interativa dos endpoints HTTP está em `http://127.0.0.1:8787/docs`.
+O contrato bruto para integração ou geração de cliente está em
+`http://127.0.0.1:8787/openapi.json`. A documentação é somente leitura e a API
+continua sem autenticação própria; mantenha `HTTP_HOST=127.0.0.1` quando não
+houver uma camada externa de proteção.
+
+Uma tarefa pode ativar uma ou mais skills no início da mensagem:
+
+```text
+@git-commit @swagger-doc prepare um commit e documente a API
+```
+
+O bridge salva os nomes junto da tarefa, valida se existem e injeta o conteúdo
+dos respectivos `SKILL.md` somente quando a execução começa. Assim, uma tarefa
+que aguarda na fila mantém sua seleção mesmo depois de um reinício. O prefixo
+`@` é uma convenção do bridge, não um autocomplete nativo do Telegram; use
+`/skills` para copiar os nomes disponíveis. Skills desconhecidas não são
+enviadas como tarefa e retornam uma mensagem com as opções encontradas.
 
 Use `/nova` e `/retomar` quando não houver tarefa ativa nesse projeto. `/nova` não apaga o histórico de tarefas nem encerra uma execução em andamento.
 
@@ -476,11 +510,16 @@ ssh -N -L 8787:127.0.0.1:8787 SEU_USUARIO@MAQUINA_DO_BRIDGE
 | GET | `/` | Painel HTML |
 | GET | `/hello-world` | Página de demonstração |
 | GET | `/app.js`, `/styles.css` | Recursos estáticos |
+| GET | `/docs` | Interface interativa Swagger UI |
+| GET | `/openapi.json` | Contrato OpenAPI 3.0.3 |
 | GET | `/health` | `{"status":"ok"}`; apenas disponibilidade HTTP |
 | GET | `/projects` | `{"projects":[...]}`, incluindo caminhos locais |
 | GET | `/status` | `{"status":"ok","tasks":[...]}` |
 | GET | `/events` | Últimos 100 eventos, ordem decrescente de ID |
 | GET | `/events?taskId=1` | Eventos dessa tarefa, ordem crescente, sem limite explícito |
+| GET | `/api/settings/schema` | Catálogo somente leitura das configurações aceitas |
+| GET | `/api/settings` | Snapshot somente leitura da configuração efetiva |
+| POST | `/api/settings/validate` | Valida um rascunho sem gravá-lo; `200` ou `422` |
 | POST | `/commands` | Cria tarefa; `202` com `{"accepted":true,"taskId":1}` |
 
 Exemplo que **executa uma nova tarefa** no projeto `demo`:
@@ -511,6 +550,7 @@ erDiagram
         TEXT thread_id
         TEXT text
         TEXT status
+        TEXT skill_names
         INTEGER chat_id
         TEXT created_at
         TEXT finished_at
@@ -554,12 +594,12 @@ As linhas representam associações lógicas; **não existem constraints `FOREIG
 |---|---|
 | `updates` | `update_id INTEGER PRIMARY KEY`; `received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`; deduplicação de mensagens |
 | `sessions` | `project_id TEXT PRIMARY KEY`; `thread_id TEXT NOT NULL`; `updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`; um vínculo por projeto |
-| `tasks` | `id INTEGER PRIMARY KEY AUTOINCREMENT`; `project_id`, `thread_id`, `text`, `status` são `TEXT NOT NULL`; `chat_id INTEGER` e `finished_at TEXT` aceitam `NULL`; `created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP` |
+| `tasks` | `id INTEGER PRIMARY KEY AUTOINCREMENT`; `project_id`, `thread_id`, `text`, `status` são `TEXT NOT NULL`; `skill_names TEXT NOT NULL DEFAULT '[]'` guarda as skills escolhidas; `chat_id INTEGER` e `finished_at TEXT` aceitam `NULL`; `created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP` |
 | `events` | `id INTEGER PRIMARY KEY AUTOINCREMENT`; `task_id INTEGER` opcional; `kind`, `text` são `TEXT NOT NULL`; `created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP` |
 | `approvals` | `id TEXT PRIMARY KEY`; `task_id INTEGER` opcional; `method`, `params` são `TEXT NOT NULL`; `params` contém JSON serializado; `status TEXT NOT NULL DEFAULT 'pending'`; `created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP` |
 | `preferences` | `chat_id INTEGER PRIMARY KEY`; `model`, `effort`, `permission_level` são `TEXT` opcionais; `updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP` |
 
-Não há constraints `CHECK` para estados. O código cria tabelas com `IF NOT EXISTS` e tenta acrescentar `chat_id` e `permission_level` a bancos anteriores; não existe framework de migrations versionadas.
+Não há constraints `CHECK` para estados. O código cria tabelas com `IF NOT EXISTS` e tenta acrescentar `chat_id`, `skill_names` e `permission_level` a bancos anteriores; não existe framework de migrations versionadas.
 
 Estados de tarefa: `queued` (fila), `running` (execução), `waiting_user` (aguardando resposta), `completed`, `failed`, `interrupted` e `unknown` (resultado indeterminado). Na inicialização, tarefas em fila, execução ou espera são marcadas `unknown` e não são reexecutadas automaticamente.
 
@@ -636,7 +676,7 @@ npm ci
 npm test
 ```
 
-Os testes atuais cobrem filtro de mensagens visíveis do agente, deduplicação de update, persistência de tarefa/aprovação e rotas HTTP com envio de comando simulado. O teste HTTP abre uma porta local temporária, e os testes de banco usam diretórios temporários.
+Os testes atuais cobrem filtro de mensagens visíveis do agente, deduplicação de update, persistência de tarefa/aprovação, descoberta de skills, interface Swagger, contrato OpenAPI e rotas HTTP com envio de comando simulado. O teste HTTP abre uma porta local temporária, e os testes de banco usam diretórios temporários.
 
 Eles não comprovam integração real com Telegram, modelos, callbacks de preferências, interrupção ou concorrência. Para validar uma entrega funcional, execute também o roteiro de aceitação da instalação, selecione modelo e esforço válidos, reinicie e confira a preferência salva.
 
@@ -724,6 +764,7 @@ pendente em ordem e marca cada item como `sent` somente após confirmação da A
 - Aprovações antigas não são todas invalidadas no reinício. Solicitações não suportadas exigem intervenção; `/responder` usa apenas a primeira pergunta.
 - Comandos desconhecidos podem virar instruções para o Codex. `/usar` sem ID e comandos com sufixo de bot em grupos não têm tratamento completo.
 - Modelos e esforços são listas manuais. Preferências não têm botão de restauração do padrão e são lidas ao iniciar cada tarefa.
+- Skills são descobertas somente nas subpastas diretas de `CODEX_SKILLS_DIR`; a lista reflete os arquivos disponíveis no ambiente do bridge, não a lista de skills do cliente que conversa com ele.
 - O painel não oferece gerenciamento completo de sessões, aprovações, cancelamento ou preferências do Codex. Recarrega o seletor de projetos nas consultas periódicas; a seleção visual pode voltar à primeira opção.
 - O histórico não possui retenção automática. O tamanho do banco e dos logs deve ser acompanhado.
 

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Project, ReasoningEffort } from './types.js';
 
 function required(name: string): string {
@@ -18,6 +19,7 @@ export type Config = {
   codexModel?: string;
   codexModels: string[];
   codexReasoningEfforts: ReasoningEffort[];
+  skillsDir: string;
   dbPath: string;
   httpHost: string;
   httpPort: number;
@@ -49,6 +51,7 @@ export function loadConfig(): Config {
     codexModel,
     codexModels,
     codexReasoningEfforts: configuredEfforts as ReasoningEffort[],
+    skillsDir: process.env.CODEX_SKILLS_DIR || join(process.env.HOME || process.cwd(), '.codex', 'skills'),
     dbPath: process.env.DB_PATH || './data/bridge.sqlite',
     httpHost: process.env.HTTP_HOST || '127.0.0.1',
     httpPort: Number(process.env.HTTP_PORT || 8787),
